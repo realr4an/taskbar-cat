@@ -37,14 +37,16 @@ jobs:
           "$hash  TaskbarKatze.exe" | Set-Content artifacts/TaskbarKatze.exe.sha256 -Encoding ascii
           $version | Set-Content artifacts/version.txt -Encoding ascii
 
-      - name: Update rolling release
+      - name: Create versioned release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view latest 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create latest --title "Taskbar Cat – aktuelle Version" --notes "Automatisch erstellte aktuelle Windows-Version."
-          }
-          gh release upload latest artifacts/TaskbarKatze.exe artifacts/TaskbarKatze.exe.sha256 artifacts/version.txt --clobber
-
+          $version = Get-Content artifacts/version.txt -Raw
+          $version = $version.Trim()
+          gh release create "v$version" `
+            artifacts/TaskbarKatze.exe `
+            artifacts/TaskbarKatze.exe.sha256 `
+            artifacts/version.txt `
+            --title "Taskbar Cat v$version" `
+            --notes "Automatisch erstellte aktuelle Windows-Version."

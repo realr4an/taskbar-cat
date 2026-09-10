@@ -33,9 +33,8 @@ Voraussetzung ist das .NET 9 SDK unter Windows.
 dotnet build src/TaskbarCat/TaskbarCat.csproj
 ```
 
-Jeder Push auf `main` erzeugt automatisch eine eigenständige Windows-x64-EXE und aktualisiert das Release `latest`. Die dabei gesetzte Dateiversion verwendet die GitHub-Actions-Laufnummer.
+Jeder Push auf `main` erzeugt automatisch eine eigenständige Windows-x64-EXE und ein eindeutig versioniertes Release. Die dabei gesetzte Dateiversion verwendet die GitHub-Actions-Laufnummer.
 
 ## Lizenz
 
 Quellcode und die projektspezifischen Sneaker-Sprites stehen unter der MIT-Lizenz.
-
