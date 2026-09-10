@@ -20,7 +20,7 @@ internal static class AutoUpdater
             string? currentExe = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(currentExe) || Path.GetFileName(currentExe).Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase)) return;
 
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
             client.DefaultRequestHeaders.UserAgent.ParseAdd("TaskbarCat-AutoUpdater/1.0");
             using var json = JsonDocument.Parse(await client.GetStringAsync(LatestReleaseApi));
             var assets = json.RootElement.GetProperty("assets").EnumerateArray()
