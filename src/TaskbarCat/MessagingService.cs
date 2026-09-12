@@ -23,6 +23,7 @@ internal sealed class MessagingService : IDisposable
 {
     // Replaced with the production workers.dev URL during deployment.
     internal const string ApiBase = "https://taskbar-cat-messaging.taskbar-cat-messaging.workers.dev";
+    private const string AdminPublicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEv7R5poB3XHMt/PrUMzzJirpLc9F6m/Bw+OEvV3kbDqfjMtoNAb51iKF0wRjSLFYqQvgCbf5fAbuylDNIuElkHg==";
     private readonly CatSettings settings;
     private readonly Action save;
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
@@ -39,10 +40,18 @@ internal sealed class MessagingService : IDisposable
 
     public async Task StartAsync()
     {
-        try { await EnsureIdentityAsync(); poll.Start(); await PollAsync(); } catch { }
+        try { await EnsureIdentityAsync(); await SyncNameAsync(); poll.Start(); await PollAsync(); } catch { }
     }
 
     public Task EnsureReadyAsync() => EnsureIdentityAsync();
+
+    public async Task SyncNameAsync()
+    {
+        if (string.IsNullOrEmpty(settings.DeviceTokenProtected)) return;
+        using var req = Authorized(HttpMethod.Put, "/v1/devices/me", JsonSerializer.Serialize(new { name = settings.Name }));
+        using var response = await http.SendAsync(req);
+        response.EnsureSuccessStatusCode();
+    }
 
     public string InviteCode
     {
@@ -101,7 +110,7 @@ internal sealed class MessagingService : IDisposable
             save();
         }
         if (!string.IsNullOrEmpty(settings.DeviceId) && !string.IsNullOrEmpty(settings.DeviceTokenProtected)) return;
-        using var response = await http.PostAsync(ApiBase + "/v1/devices", new StringContent(JsonSerializer.Serialize(new { publicKey = settings.PublicKey }), Encoding.UTF8, "application/json"));
+        using var response = await http.PostAsync(ApiBase + "/v1/devices", new StringContent(JsonSerializer.Serialize(new { publicKey = settings.PublicKey, name = settings.Name }), Encoding.UTF8, "application/json"));
         response.EnsureSuccessStatusCode();
         var registration = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         settings.DeviceId = registration.GetProperty("id").GetString()!;
@@ -137,6 +146,7 @@ internal sealed class MessagingService : IDisposable
     private IncomingCatMessage Decrypt(string envelopeJson, string serverSenderId)
     {
         var env = JsonDocument.Parse(envelopeJson).RootElement;
+        if (env.TryGetProperty("type", out var type) && type.GetString() == "admin" && serverSenderId == "admin") return DecryptAdmin(env);
         var contact = settings.Contacts.FirstOrDefault(x => x.Id == serverSenderId) ?? throw new CryptographicException("Unbekannter Absender");
         using var own = ECDiffieHellman.Create();
         own.ImportPkcs8PrivateKey(ProtectedData.Unprotect(Convert.FromBase64String(settings.PrivateKeyProtected), null, DataProtectionScope.CurrentUser), out _);
@@ -147,6 +157,27 @@ internal sealed class MessagingService : IDisposable
         using (var aes = new AesGcm(secret, 16)) aes.Decrypt(Convert.FromBase64String(env.GetProperty("nonce").GetString()!), cipher, Convert.FromBase64String(env.GetProperty("tag").GetString()!), plain, Encoding.UTF8.GetBytes(settings.DeviceId));
         var data = JsonDocument.Parse(plain).RootElement;
         if (data.GetProperty("senderId").GetString() != serverSenderId) throw new CryptographicException();
+        return AcceptPayload(data, contact.Name);
+    }
+
+    private IncomingCatMessage DecryptAdmin(JsonElement env)
+    {
+        var nonceText = env.GetProperty("nonce").GetString()!; var cipherText = env.GetProperty("ciphertext").GetString()!; var tagText = env.GetProperty("tag").GetString()!;
+        var canonical = $"{nonceText}.{cipherText}.{tagText}.{settings.DeviceId}";
+        using var adminVerify = ECDsa.Create(); adminVerify.ImportSubjectPublicKeyInfo(Convert.FromBase64String(AdminPublicKey), out _);
+        if (!adminVerify.VerifyData(Encoding.UTF8.GetBytes(canonical), FromBase64Url(env.GetProperty("signature").GetString()!), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)) throw new CryptographicException("Ungültige Admin-Signatur");
+        using var own = ECDiffieHellman.Create(); own.ImportPkcs8PrivateKey(ProtectedData.Unprotect(Convert.FromBase64String(settings.PrivateKeyProtected), null, DataProtectionScope.CurrentUser), out _);
+        using var adminKey = ECDiffieHellman.Create(); adminKey.ImportSubjectPublicKeyInfo(Convert.FromBase64String(AdminPublicKey), out _);
+        var secret = own.DeriveKeyFromHash(adminKey.PublicKey, HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes("TaskbarCat-v1"), Encoding.UTF8.GetBytes(settings.DeviceId));
+        var cipher = FromBase64Url(cipherText); var plain = new byte[cipher.Length];
+        using (var aes = new AesGcm(secret, 16)) aes.Decrypt(FromBase64Url(nonceText), cipher, FromBase64Url(tagText), plain, Encoding.UTF8.GetBytes(settings.DeviceId));
+        var data = JsonDocument.Parse(plain).RootElement;
+        if (data.GetProperty("senderId").GetString() != "admin") throw new CryptographicException();
+        return AcceptPayload(data, "Taskbar Cat Admin");
+    }
+
+    private IncomingCatMessage AcceptPayload(JsonElement data, string senderName)
+    {
         var messageId = data.GetProperty("messageId").GetString() ?? throw new CryptographicException();
         if (!Guid.TryParse(messageId, out _) || settings.SeenMessageIds.Contains(messageId)) throw new CryptographicException("Wiederholte Nachricht");
         var sentAt = data.GetProperty("sentAt").GetInt64();
@@ -154,7 +185,7 @@ internal sealed class MessagingService : IDisposable
         settings.SeenMessageIds.Add(messageId);
         if (settings.SeenMessageIds.Count > 1000) settings.SeenMessageIds.RemoveRange(0, settings.SeenMessageIds.Count - 1000);
         save();
-        return new IncomingCatMessage { SenderName = contact.Name, Text = data.GetProperty("text").GetString() ?? "" };
+        return new IncomingCatMessage { SenderName = senderName, Text = data.GetProperty("text").GetString() ?? "" };
     }
 
     private HttpRequestMessage Authorized(HttpMethod method, string path, string? json)

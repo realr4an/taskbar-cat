@@ -93,6 +93,7 @@ internal sealed class CatContext : ApplicationContext
             cat.ApplySettings(settings);
             tray.Text = TrayText(settings.Name);
             SaveSettings();
+            _ = messaging.SyncNameAsync();
         }
     }
 

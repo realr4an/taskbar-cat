@@ -28,6 +28,10 @@ Nachrichten werden bereits auf dem PC mit ECDH P-256 und AES-256-GCM verschlüss
 
 Der Dienst nutzt ausschließlich die kostenlosen Kontingente von Cloudflare Workers und D1. Es gibt keine kostenpflichtige API und kein Abo innerhalb der App.
 
+## Admin-Dashboard
+
+Unter der geschützten `/admin`-Adresse kann der Betreiber eine registrierte Katze auswählen und ihr eine Gedankenblasen-Nachricht schicken. Der Zugang besitzt ein separates, zufälliges Admin-Passwort, ein `Secure`/`HttpOnly`/`SameSite=Strict`-Sitzungscookie, CSRF-Schutz und eine Begrenzung fehlgeschlagener Anmeldungen. Admin-Nachrichten werden für das Zielgerät verschlüsselt und mit einem fest in der App verankerten P-256-Administratorschlüssel signiert.
+
 ## Bedienung
 
 - **Hover:** Sneaker hebt im Schlaf müde den Kopf.
