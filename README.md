@@ -33,7 +33,7 @@ Voraussetzung ist das .NET 9 SDK unter Windows.
 dotnet build src/TaskbarCat/TaskbarCat.csproj
 ```
 
-Jeder Push auf `main` erzeugt automatisch eine eigenständige Windows-x64-EXE und ein eindeutig versioniertes Release. Die dabei gesetzte Dateiversion verwendet die GitHub-Actions-Laufnummer.
+Jeder Push auf `main` erzeugt automatisch eine eigenständige Windows-x86-EXE und ein eindeutig versioniertes Release. Die x86-Ausgabe läuft auf Windows 11 x64 sowie über die integrierte Emulation auf Windows 11 ARM64. Die dabei gesetzte Dateiversion verwendet die GitHub-Actions-Laufnummer.
 
 ## Lizenz
 

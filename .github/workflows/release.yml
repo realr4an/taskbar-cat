@@ -25,7 +25,7 @@ jobs:
         run: |
           $version = "1.0.${{ github.run_number }}"
           dotnet publish src/TaskbarCat/TaskbarCat.csproj `
-            -c Release -r win-x64 --self-contained true `
+            -c Release -r win-x86 --self-contained true `
             -p:PublishSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:Version=$version `
