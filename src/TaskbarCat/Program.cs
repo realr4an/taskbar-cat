@@ -20,7 +20,8 @@ internal static class Program
             File.WriteAllText(log, $"{DateTime.Now:O} start{Environment.NewLine}");
             ApplicationConfiguration.Initialize();
             File.AppendAllText(log, "configuration ready\n");
-            Application.Run(new CatContext(log));
+            bool settingsMode = args.Contains("--settings", StringComparer.OrdinalIgnoreCase);
+            Application.Run(new CatContext(log, settingsMode, settingsMode));
         }
         catch (Exception ex)
         {
@@ -53,7 +54,7 @@ internal sealed class CatContext : ApplicationContext
     private readonly string settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskbarCat", "settings.json");
     private CatSettings settings;
 
-    public CatContext(string startupLog)
+    public CatContext(string startupLog, bool openSettingsOnStart = false, bool skipUpdater = false)
     {
         settings = LoadSettings();
         File.AppendAllText(startupLog, "settings ready\n");
@@ -77,9 +78,10 @@ internal sealed class CatContext : ApplicationContext
         cat.MouseUp += (_, e) => { if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position); };
         tray.DoubleClick += (_, _) => OpenSettings();
         cat.Show();
+        if (openSettingsOnStart) cat.BeginInvoke(OpenSettings);
         _ = messaging.StartAsync();
         File.AppendAllText(startupLog, "cat window shown\n");
-        _ = AutoUpdater.CheckAndApplyAsync(cat, CloseApp);
+        if (!skipUpdater) _ = AutoUpdater.CheckAndApplyAsync(cat, CloseApp);
     }
 
     private void OpenSettings()
@@ -317,7 +319,6 @@ internal sealed class CatWindow : Form
     private void Animate()
     {
         var area = CurrentArea();
-        TopMost = true;
         if (dragging) { displayFrame = direction > 0 ? awakeRight : awakeLeft; Invalidate(); return; }
         if (Paused) { displayFrame = direction > 0 ? sleepRight[0] : sleepLeft[0]; Invalidate(); return; }
         tick++;
@@ -653,6 +654,7 @@ internal sealed class SettingsForm : Form
         Text = $"{current.Name} · Katzenmenü";
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen; ClientSize = new Size(610, 570);
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(246, 242, 234); Font = new Font("Segoe UI", 10);
         var header = new Label { Text = "🐾  Taskbar Cat", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = Color.FromArgb(35, 52, 39), AutoSize = true, Location = new Point(22, 14) };
         var tabs = new TabControl { Location = new Point(18, 56), Size = new Size(574, 448) };
@@ -675,7 +677,7 @@ internal sealed class SettingsForm : Form
 
         ownCode.SetBounds(15, 50, 520, 78); ownCode.Text = messaging.InviteCode;
         ownCode.Click += (_, _) => ownCode.SelectAll();
-        Shown += async (_, _) => { await messaging.StartAsync(); ownCode.Text = messaging.InviteCode; };
+        Shown += async (_, _) => { Activate(); catName.Focus(); await messaging.StartAsync(); ownCode.Text = messaging.InviteCode; };
         var copy = ButtonFor("Meinen Code kopieren", 15, 138, async () =>
         {
             try
