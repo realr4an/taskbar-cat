@@ -674,8 +674,28 @@ internal sealed class SettingsForm : Form
         general.Controls.Add(stack);
 
         ownCode.SetBounds(15, 50, 520, 78); ownCode.Text = messaging.InviteCode;
+        ownCode.Click += (_, _) => ownCode.SelectAll();
         Shown += async (_, _) => { await messaging.StartAsync(); ownCode.Text = messaging.InviteCode; };
-        var copy = ButtonFor("Meinen Code kopieren", 15, 138, async () => { Clipboard.SetText(messaging.InviteCode); status.Text = "Freundescode kopiert."; await Task.CompletedTask; });
+        var copy = ButtonFor("Meinen Code kopieren", 15, 138, async () =>
+        {
+            try
+            {
+                status.Text = "Freundescode wird vorbereitet …";
+                await messaging.EnsureReadyAsync();
+                var code = messaging.InviteCode;
+                if (!code.StartsWith("TC1.", StringComparison.Ordinal)) throw new InvalidOperationException("Der Freundescode ist noch nicht verfügbar.");
+                ownCode.Text = code;
+                // Windows can briefly lock the clipboard. This overload retries
+                // instead of making the button appear to do nothing.
+                Clipboard.SetDataObject(code, true, 10, 100);
+                status.Text = "Freundescode wurde kopiert. ✓";
+            }
+            catch (Exception ex)
+            {
+                status.Text = "Kopieren fehlgeschlagen.";
+                MessageBox.Show($"Der Freundescode konnte nicht kopiert werden.\n\n{ex.Message}", "Taskbar Cat", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        });
         friendCode.SetBounds(15, 225, 520, 72);
         var add = ButtonFor("Freund hinzufügen", 15, 307, async () => { try { var c = messaging.AddContact(friendCode.Text); contacts.Items.Add(c); friendCode.Clear(); status.Text = $"{c.Name} wurde hinzugefügt."; } catch (Exception ex) { MessageBox.Show(ex.Message, "Freundescode", MessageBoxButtons.OK, MessageBoxIcon.Information); } await Task.CompletedTask; });
         friends.Controls.AddRange(new Control[] { PositionedLabel("Dein persönlicher Freundescode", 15, 18), ownCode, copy, PositionedLabel("Code eines Freundes einfügen", 15, 193), friendCode, add });

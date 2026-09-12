@@ -42,6 +42,8 @@ internal sealed class MessagingService : IDisposable
         try { await EnsureIdentityAsync(); poll.Start(); await PollAsync(); } catch { }
     }
 
+    public Task EnsureReadyAsync() => EnsureIdentityAsync();
+
     public string InviteCode
     {
         get
