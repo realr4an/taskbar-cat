@@ -1,56 +1,133 @@
-# Taskbar Cat
+# 🐾 Taskbar Cat
 
-Taskbar Cat bringt **Sneaker**, eine kleine animierte schwarze Pixelkatze, auf die untere Bildschirmkante von Windows 11.
+Eine kleine schwarze Pixelkatze für die Windows-11-Taskleiste. **Sneaker** schläft am Bildschirmrand, wacht beim Darüberfahren mit der Maus auf und beginnt nach einem Klick ihre Runde. Sie kann laufen, springen, sich putzen und Nachrichten anderer Katzen als Gedankenblase anzeigen.
 
-## Funktionen
+[![Latest release](https://img.shields.io/github/v/release/realr4an/taskbar-cat?label=Download&color=5c8f63)](https://github.com/realr4an/taskbar-cat/releases/latest)
+[![Windows 11](https://img.shields.io/badge/Windows-11-357ec7)](#download)
+[![License: MIT](https://img.shields.io/badge/License-MIT-6b7280.svg)](LICENSE)
 
-- schläft am Rand und hebt beim Hover müde den Kopf
-- putzt sich nach einem Klick und läuft anschließend los
-- natürliche Laufanimation in beide Richtungen
-- gelegentliche Sprünge, Putzpausen und Sprechblasen
-- frei verschiebbar per Drag-and-drop
-- auswählbarer Bildschirm und Bewegungsbereich
-- weltweit eindeutiger Katzenname, Standard: Sneaker mit automatischem Zusatz falls bereits vergeben
-- Tray-Menü für Einstellungen, Pause und Beenden
-- automatische, geprüfte Updates aus GitHub Releases
-- Namenssuche mit zehn ähnlichen Treffern und gegenseitiger Freundesliste
-- Ende-zu-Ende verschlüsselte Nachrichten als dynamische Gedankenblasen
+## Sneaker in Bewegung
 
-## Download
+Die Animationen bestehen aus handabgestimmten Einzelbildern. Die App bewegt die Katze mit 60 Aktualisierungen pro Sekunde, während die eigentlichen Posen bewusst etwas länger sichtbar bleiben. Dadurch wirkt die Bewegung ruhig und pixeltypisch statt hektisch.
 
-Im Bereich **Releases** liegt immer die aktuelle `TaskbarKatze.exe`. Weitere Installationen oder Laufzeitpakete sind nicht erforderlich.
+### Laufen
 
-## Private Katzenpost
+![Sneakers Laufanimation](src/TaskbarCat/Assets/sneaker-walk.png)
 
-Im Katzenmenü unter **Freunde** sucht man ab zwei Zeichen nach einem eindeutigen Katzennamen. Die zehn ähnlichsten Treffer werden angezeigt; ein Klick verbindet beide Katzen gegenseitig. Danach lassen sich Nachrichten mit bis zu 500 Zeichen senden. Die Gedankenblase passt Breite, Höhe und Zeilenumbrüche automatisch an den verfügbaren Bildschirm an.
+### Putzen und springen
 
-Nachrichten werden bereits auf dem PC mit ECDH P-256 und AES-256-GCM verschlüsselt. Der private Schlüssel und das Geräte-Token sind per Windows DPAPI an das jeweilige Windows-Benutzerkonto gebunden. Der Vermittlungsdienst sieht nur verschlüsselte Nachrichten, löscht zugestellte Inhalte und verwirft nicht zugestellte Inhalte spätestens nach sieben Tagen. Unbekannte Absender werden nicht angezeigt.
-
-Der Dienst nutzt ausschließlich die kostenlosen Kontingente von Cloudflare Workers und D1. Es gibt keine kostenpflichtige API und kein Abo innerhalb der App.
-
-## Admin-Dashboard
-
-Unter der geschützten `/admin`-Adresse kann der Betreiber eine registrierte Katze nach ihrem eindeutigen Namen auswählen, seinen Absendernamen hinterlegen und ihr eine Gedankenblasen-Nachricht schicken. Der Zugang besitzt ein separates, zufälliges Admin-Passwort, ein `Secure`/`HttpOnly`/`SameSite=Strict`-Sitzungscookie, CSRF-Schutz und eine Begrenzung fehlgeschlagener Anmeldungen. Admin-Nachrichten werden für das Zielgerät verschlüsselt und mit einem fest in der App verankerten P-256-Administratorschlüssel signiert.
+<p align="center">
+  <img src="src/TaskbarCat/Assets/sneaker-groom.png" alt="Sneaker putzt sich" width="48%">
+  <img src="src/TaskbarCat/Assets/sneaker-jump.png" alt="Sneaker springt" width="48%">
+</p>
 
 ## Bedienung
 
-- **Hover:** Sneaker hebt im Schlaf müde den Kopf.
-- **Linksklick:** Sneaker putzt sich und läuft los. Während des Laufens reagiert sie mit einem kleinen Sprung.
-- **Ziehen:** Sneaker kann an eine andere Stelle gesetzt werden und läuft dort weiter.
-- **Rechtsklick / Tray-Symbol:** Einstellungen, Pause oder Beenden.
+| Aktion | Reaktion der Katze |
+| --- | --- |
+| Maus über die schlafende Katze bewegen | Sie hebt müde den Kopf, bleibt aber liegen. |
+| Katze anklicken | Sie putzt sich und läuft anschließend los. |
+| Laufende Katze anklicken | Sie reagiert mit einem Sprung in ihre Laufrichtung. |
+| Katze ziehen | Sie kann versetzt werden und läuft am neuen Ort weiter. |
+| Eine Weile warten | Sie macht Putzpausen, miaut oder legt sich wieder schlafen. |
+| Tray-Symbol öffnen | Katzenmenü anzeigen, pausieren oder die App beenden. |
 
-## Entwicklung
+## Funktionen
 
-Voraussetzung ist das .NET 9 SDK unter Windows.
+- transparente, nicht störende Desktop-Figur oberhalb der Taskleiste
+- getrennte Animationen für Schlafen, Aufwachen, Laufen, Putzen und Springen
+- korrekte Spiegelung für beide Laufrichtungen
+- frei einstellbarer Bildschirm und Bewegungsbereich
+- eindeutiger öffentlicher Katzenname; Standardname ist `Sneaker`
+- Suche nach Katzennamen mit bis zu zehn ähnlichen Treffern
+- gegenseitige Freundesliste ohne Austausch langer Einladungscodes
+- verschlüsselte Nachrichten in automatisch wachsenden Gedankenblasen
+- Tray-Menü mit Einstellungen, Pause und Beenden
+- automatische Aktualisierung über geprüfte GitHub-Releases
+- eigenständige EXE ohne separate .NET-Installation
+
+## Die Designidee
+
+Taskbar Cat soll sich wie ein kleiner, ruhiger Mitbewohner anfühlen und nicht wie ein weiteres Programmfenster. Darum folgt das Projekt vier Grundideen:
+
+1. **Unaufdringlich:** Die Katze bleibt an der unteren Bildschirmkante und blockiert keine normale Bedienung.
+2. **Natürlich reagierend:** Hover weckt sie nur auf. Erst ein bewusster Klick startet eine Aktivität.
+3. **Wiedererkennbar:** Schwarzes Fell, grüne Augen und weiße Pfoten bleiben in allen Posen erhalten.
+4. **Persönlich:** Jede Katze erhält einen eigenen Namen, kann Freunde finden und kurze Nachrichten sichtbar überbringen.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Schlafen
+    Schlafen --> Muede_wach: Maus darüber
+    Muede_wach --> Putzen: Klick
+    Putzen --> Laufen
+    Laufen --> Springen: Klick oder gelegentlich
+    Springen --> Laufen
+    Laufen --> Pause: gelegentlich
+    Pause --> Laufen
+    Laufen --> Putzen: Runde beendet
+    Putzen --> Schlafen
+```
+
+## Katzenfreunde und Nachrichten
+
+Im Katzenmenü reicht ein Teil des gesuchten Namens. Die App zeigt höchstens zehn passende Katzen an. Wird eine Katze hinzugefügt, erscheint die Verbindung automatisch auf beiden Freundeslisten. Anschließend können Nachrichten mit bis zu 500 Zeichen gesendet werden.
+
+```mermaid
+flowchart LR
+    A[Katze A] -->|Name suchen| S[Taskbar-Cat-Dienst]
+    S -->|maximal 10 Treffer| A
+    A <-->|Freundschaft| B[Katze B]
+    A -->|lokal verschlüsseln| E[Verschlüsselter Umschlag]
+    E --> S
+    S --> B
+    B -->|lokal entschlüsseln| G[Gedankenblase]
+```
+
+Normale Freundesnachrichten werden auf dem sendenden PC mit ECDH P-256 und AES-256-GCM verschlüsselt. Private Schlüssel sowie das Geräte-Token sind mit Windows DPAPI an das Windows-Benutzerkonto gebunden. Nicht zugestellte Nachrichten laufen nach spätestens sieben Tagen ab. Weitere Einzelheiten stehen in [SECURITY.md](SECURITY.md).
+
+## Download
+
+1. Unter [Releases](https://github.com/realr4an/taskbar-cat/releases/latest) die aktuelle `TaskbarKatze.exe` herunterladen.
+2. Die EXE starten. Eine Installation ist nicht erforderlich.
+3. Das Katzenmenü über das Tray-Symbol öffnen und Name, Bildschirm sowie Bewegungsbereich einstellen.
+
+Windows kann bei einer noch nicht kommerziell signierten Anwendung einen SmartScreen-Hinweis anzeigen. Veröffentlichte Dateien enthalten deshalb zusätzlich eine SHA-256-Prüfsumme im jeweiligen Release.
+
+## Projektaufbau
+
+```text
+taskbar-cat/
+├─ src/TaskbarCat/          Windows-App, Animationen und lokale Kryptografie
+│  └─ Assets/               Pixel-Art-Sprite-Sheets
+├─ backend/                 Cloudflare Worker und D1-Migrationen
+├─ .github/workflows/       automatischer Build und Release
+├─ SECURITY.md              Sicherheits- und Datenschutzmodell
+└─ LICENSE                  MIT-Lizenz
+```
+
+Die Desktop-App verwendet Windows Forms auf .NET 9. Das schlanke Backend läuft als Cloudflare Worker mit D1. Jeder Push auf `main` erstellt automatisiert eine eigenständige Windows-EXE und ein versioniertes GitHub-Release.
+
+## Lokal entwickeln
+
+Voraussetzung ist das .NET 9 SDK auf Windows:
 
 ```powershell
 dotnet build src/TaskbarCat/TaskbarCat.csproj
 ```
 
-Das optionale Backend liegt unter `backend/`; Schema, Worker und Konfiguration sind versioniert. `npm test` prüft den TypeScript-Code.
+Backend prüfen:
 
-Jeder Push auf `main` erzeugt automatisch eine eigenständige Windows-x86-EXE und ein eindeutig versioniertes Release. Die x86-Ausgabe läuft auf Windows 11 x64 sowie über die integrierte Emulation auf Windows 11 ARM64. Die dabei gesetzte Dateiversion verwendet die GitHub-Actions-Laufnummer.
+```powershell
+cd backend
+npm ci
+npm test
+```
+
+## Datenschutz
+
+In der Namenssuche sichtbar ist der selbst gewählte Katzenname. Für die technische Zustellung verarbeitet der Dienst Geräte-IDs, Freundschaftsbeziehungen und Zeitpunkte. Nachrichteninhalte zwischen Freunden werden ausschließlich verschlüsselt übertragen. Das vollständige Schutzmodell und seine Grenzen sind in [SECURITY.md](SECURITY.md) dokumentiert.
 
 ## Lizenz
 
-Quellcode und die projektspezifischen Sneaker-Sprites stehen unter der MIT-Lizenz.
+Quellcode und projektspezifische Sneaker-Sprites stehen unter der [MIT-Lizenz](LICENSE).
