@@ -5,6 +5,8 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 const sha256 = async (text: string) => b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))));
 const validId = (s: string) => /^[0-9a-f-]{36}$/i.test(s);
+const normalizeUsername = (value: string) => value.trim().replace(/\s+/g, " ");
+const validUsername = (value: string) => /^[\p{L}\p{N}][\p{L}\p{N} ._-]{2,23}$/u.test(value);
 const ADMIN_PUBLIC_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEv7R5poB3XHMt/PrUMzzJirpLc9F6m/Bw+OEvV3kbDqfjMtoNAb51iKF0wRjSLFYqQvgCbf5fAbuylDNIuElkHg==";
 const utf8 = (value: string) => new TextEncoder().encode(value);
 const fromB64 = (value: string) => Uint8Array.from(atob(value), c => c.charCodeAt(0));
@@ -41,12 +43,15 @@ function page(content: string, status = 200, extra: HeadersInit = {}) {
   return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Taskbar Cat Admin</title><style>body{margin:0;background:#f5f1e8;color:#203326;font:16px system-ui}.wrap{max-width:760px;margin:48px auto;padding:24px}.card{background:#fffdf8;border:1px solid #cad8c9;border-radius:18px;padding:26px;box-shadow:0 12px 35px #20332618}h1{margin-top:0}label{display:block;margin:18px 0 6px;font-weight:650}input,select,textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #9cad9c;border-radius:9px;font:inherit}textarea{min-height:150px;resize:vertical}button{margin-top:18px;padding:12px 18px;border:1px solid #6e906f;border-radius:9px;background:#dcebdc;color:#19371f;font-weight:700;cursor:pointer}.note{color:#58705c;font-size:14px}.ok{padding:10px;background:#e1f4df;border-radius:8px}</style></head><body><main class="wrap"><div class="card">${content}</div></main></body></html>`, { status, headers: { ...securityHeaders, ...extra } });
 }
 async function adminDashboard(env: Env, csrf: string, sent: boolean) {
-  const rows = await env.DB.prepare("SELECT id,display_name,last_seen FROM devices ORDER BY last_seen DESC LIMIT 500").all<{id:string,display_name:string,last_seen:number}>();
-  const options = rows.results.map(d => `<option value="${htmlEscape(d.id)}">${htmlEscape(d.display_name)} · ${htmlEscape(d.id.slice(0, 8))}</option>`).join("");
-  return page(`<h1>🐾 Taskbar Cat Admin</h1>${sent ? '<p class="ok">Nachricht wurde sicher bereitgestellt.</p>' : ''}<form method="post" action="/admin/send"><input type="hidden" name="csrf" value="${htmlEscape(csrf)}"><label>Empfänger</label><select name="recipientId" required>${options}</select><label>Gedankenblasen-Nachricht</label><textarea name="message" maxlength="500" required></textarea><button type="submit">Nachricht senden</button></form><p class="note">Maximal 500 Zeichen. Die Nachricht wird für das ausgewählte Gerät verschlüsselt und als signierte Admin-Nachricht zugestellt.</p>`);
+  const [rows, profile] = await Promise.all([
+    env.DB.prepare("SELECT id,username,last_seen FROM devices WHERE id <> 'admin' ORDER BY username COLLATE NOCASE LIMIT 500").all<{id:string,username:string,last_seen:number}>(),
+    env.DB.prepare("SELECT sender_name FROM admin_settings WHERE id=1").first<{sender_name:string}>()
+  ]);
+  const options = rows.results.map(d => `<option value="${htmlEscape(d.id)}">${htmlEscape(d.username)} · ${htmlEscape(d.id.slice(0, 8))}</option>`).join("");
+  return page(`<h1>🐾 Taskbar Cat Admin</h1>${sent ? '<p class="ok">Nachricht wurde sicher bereitgestellt.</p>' : ''}<form method="post" action="/admin/send"><input type="hidden" name="csrf" value="${htmlEscape(csrf)}"><label>Dein Absendername</label><input name="senderName" minlength="1" maxlength="40" value="${htmlEscape(profile?.sender_name ?? "Taskbar Cat Admin")}" required><label>Empfänger</label><select name="recipientId" required>${options}</select><label>Nachricht</label><textarea name="message" maxlength="500" required></textarea><button type="submit">Nachricht senden</button></form><p class="note">Die Nachricht erscheint mit deinem Absendernamen in der Gedankenblase der ausgewählten Katze.</p>`);
 }
 
-async function createAdminEnvelope(env: Env, recipientId: string, recipientPublicKey: string, text: string) {
+async function createAdminEnvelope(env: Env, recipientId: string, recipientPublicKey: string, senderName: string, text: string) {
   const privateBytes = fromB64(env.ADMIN_EC_PRIVATE_KEY);
   const privateEcdh = await crypto.subtle.importKey("pkcs8", privateBytes, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
   const recipientKey = await crypto.subtle.importKey("spki", fromB64(recipientPublicKey), { name: "ECDH", namedCurve: "P-256" }, false, []);
@@ -56,7 +61,7 @@ async function createAdminEnvelope(env: Env, recipientId: string, recipientPubli
   keyMaterial.set(utf8("TaskbarCat-v1")); keyMaterial.set(shared, utf8("TaskbarCat-v1").length); keyMaterial.set(utf8(recipientId), utf8("TaskbarCat-v1").length + shared.length);
   const aesKey = await crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", keyMaterial), "AES-GCM", false, ["encrypt"]);
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = utf8(JSON.stringify({ messageId: crypto.randomUUID(), senderId: "admin", senderName: "Taskbar Cat Admin", text, sentAt: Date.now() }));
+  const plaintext = utf8(JSON.stringify({ messageId: crypto.randomUUID(), senderId: "admin", senderName, text, sentAt: Date.now() }));
   const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: utf8(recipientId), tagLength: 128 }, aesKey, plaintext));
   const ciphertext = sealed.slice(0, -16), tag = sealed.slice(-16);
   const canonical = `${b64url(nonce)}.${b64url(ciphertext)}.${b64url(tag)}.${recipientId}`;
@@ -98,20 +103,22 @@ export default {
         const session = await readSession(request, env); if (!session) return new Response(null, { status: 303, headers: { location: "/admin" } });
         const form = await request.formData();
         if (String(form.get("csrf")) !== session.csrf) return page("<h1>Ungültige Anfrage</h1>", 403);
-        const recipientId = String(form.get("recipientId") ?? ""), message = String(form.get("message") ?? "").trim();
-        if (!validId(recipientId) || message.length < 1 || message.length > 500) return page("<h1>Ungültige Nachricht</h1>", 400);
+        const recipientId = String(form.get("recipientId") ?? ""), message = String(form.get("message") ?? "").trim(), senderName = String(form.get("senderName") ?? "").trim();
+        if (!validId(recipientId) || message.length < 1 || message.length > 500 || senderName.length < 1 || senderName.length > 40) return page("<h1>Ungültige Nachricht</h1>", 400);
         const recipient = await env.DB.prepare("SELECT public_key FROM devices WHERE id=?").bind(recipientId).first<{public_key:string}>();
         if (!recipient) return page("<h1>Empfänger nicht gefunden</h1>", 404);
-        const envelope = await createAdminEnvelope(env, recipientId, recipient.public_key, message), now = Date.now();
-        await env.DB.prepare("INSERT INTO messages(id,sender_id,recipient_id,envelope,created_at,expires_at) VALUES(?,?,?,?,?,?)").bind(crypto.randomUUID(), "admin", recipientId, envelope, now, now + 7 * 86400000).run();
+        const envelope = await createAdminEnvelope(env, recipientId, recipient.public_key, senderName, message), now = Date.now();
+        await env.DB.batch([
+          env.DB.prepare("UPDATE admin_settings SET sender_name=? WHERE id=1").bind(senderName),
+          env.DB.prepare("INSERT INTO messages(id,sender_id,recipient_id,envelope,created_at,expires_at) VALUES(?,?,?,?,?,?)").bind(crypto.randomUUID(), "admin", recipientId, envelope, now, now + 7 * 86400000)
+        ]);
         return new Response(null, { status: 303, headers: { location: "/admin?sent=1", "cache-control": "no-store" } });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/devices") {
         const body = await request.json<{ publicKey?: string, name?: string }>();
         if (!body.publicKey || body.publicKey.length < 80 || body.publicKey.length > 500) return json({ error: "invalid_public_key" }, 400);
-        const displayName = (body.name ?? "Sneaker").trim();
-        if (displayName.length < 1 || displayName.length > 40) return json({ error: "invalid_name" }, 400);
+        const requestedName = normalizeUsername(body.name ?? "Sneaker");
         const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
         const registrationKey = "register:" + await sha256(ip + ":" + new Date().toISOString().slice(0, 10));
         const registrations = await env.DB.prepare("SELECT COUNT(*) n FROM rate_events WHERE event_key=? AND created_at>?").bind(registrationKey, Date.now() - 86400000).first<{n:number}>();
@@ -119,20 +126,52 @@ export default {
         const id = crypto.randomUUID();
         const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
         const now = Date.now();
-        await env.DB.prepare("INSERT INTO devices(id, token_hash, public_key, created_at, last_seen, display_name) VALUES(?,?,?,?,?,?)")
-          .bind(id, await sha256(token), body.publicKey, now, now, displayName).run();
+        const nameTaken = validUsername(requestedName) ? await env.DB.prepare("SELECT 1 found FROM devices WHERE username=? COLLATE NOCASE").bind(requestedName).first() : true;
+        const username = !nameTaken ? requestedName : `Sneaker-${id.slice(0, 6)}`;
+        await env.DB.prepare("INSERT INTO devices(id, token_hash, public_key, created_at, last_seen, display_name, username) VALUES(?,?,?,?,?,?,?)")
+          .bind(id, await sha256(token), body.publicKey, now, now, username, username).run();
         await env.DB.prepare("INSERT INTO rate_events(event_key,created_at) VALUES(?,?)").bind(registrationKey, now).run();
-        return json({ id, token }, 201);
+        return json({ id, token, username }, 201);
       }
 
       const auth = await authenticate(request, env);
       if (!auth) return json({ error: "unauthorized" }, 401);
 
       if (request.method === "PUT" && url.pathname === "/v1/devices/me") {
-        const body = await request.json<{ name?: string }>(); const name = (body.name ?? "").trim();
-        if (name.length < 1 || name.length > 40) return json({ error: "invalid_name" }, 400);
-        await env.DB.prepare("UPDATE devices SET display_name=?,last_seen=? WHERE id=?").bind(name, Date.now(), auth.id).run();
+        const body = await request.json<{ name?: string }>(); const name = normalizeUsername(body.name ?? "");
+        if (!validUsername(name)) return json({ error: "invalid_name" }, 400);
+        const taken = await env.DB.prepare("SELECT id FROM devices WHERE username=? COLLATE NOCASE AND id<>?").bind(name, auth.id).first();
+        if (taken) return json({ error: "username_taken" }, 409);
+        await env.DB.prepare("UPDATE devices SET display_name=?,username=?,last_seen=? WHERE id=?").bind(name, name, Date.now(), auth.id).run();
         return new Response(null, { status: 204 });
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/users/search") {
+        const query = normalizeUsername(url.searchParams.get("q") ?? "");
+        if (query.length < 2 || query.length > 24) return json({ users: [] });
+        const escaped = query.replace(/[\\%_]/g, "\\$&");
+        const rows = await env.DB.prepare("SELECT id,username FROM devices WHERE id<>? AND id<>'admin' AND username LIKE ? ESCAPE '\\' COLLATE NOCASE ORDER BY CASE WHEN username LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 0 ELSE 1 END, length(username), username COLLATE NOCASE LIMIT 10")
+          .bind(auth.id, `%${escaped}%`, `${escaped}%`).all<{id:string,username:string}>();
+        return json({ users: rows.results });
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/friends") {
+        const rows = await env.DB.prepare("SELECT d.id,d.username,d.public_key publicKey FROM friendships f JOIN devices d ON d.id=f.friend_id WHERE f.device_id=? ORDER BY d.username COLLATE NOCASE")
+          .bind(auth.id).all<{id:string,username:string,publicKey:string}>();
+        return json({ friends: rows.results });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/friends") {
+        const body = await request.json<{ deviceId?: string }>(); const friendId = body.deviceId ?? "";
+        if (!validId(friendId) || friendId === auth.id) return json({ error: "invalid_friend" }, 400);
+        const friend = await env.DB.prepare("SELECT id,username,public_key publicKey FROM devices WHERE id=? AND id<>'admin'").bind(friendId).first<{id:string,username:string,publicKey:string}>();
+        if (!friend) return json({ error: "not_found" }, 404);
+        const now = Date.now();
+        await env.DB.batch([
+          env.DB.prepare("INSERT OR IGNORE INTO friendships(device_id,friend_id,created_at) VALUES(?,?,?)").bind(auth.id, friendId, now),
+          env.DB.prepare("INSERT OR IGNORE INTO friendships(device_id,friend_id,created_at) VALUES(?,?,?)").bind(friendId, auth.id, now)
+        ]);
+        return json({ friend }, 201);
       }
 
       if (request.method === "POST" && url.pathname === "/v1/messages") {

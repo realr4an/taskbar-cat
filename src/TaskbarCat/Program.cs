@@ -595,7 +595,7 @@ internal sealed class RangeForm : Form
     private readonly TrackBar left = new() { Minimum = 0, Maximum = 90, TickFrequency = 10, Width = 330 };
     private readonly TrackBar right = new() { Minimum = 10, Maximum = 100, TickFrequency = 10, Width = 330 };
     private readonly ComboBox monitor = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330 };
-    private readonly TextBox catName = new() { Width = 330, MaxLength = 40 };
+    private readonly TextBox catName = new() { Width = 330, MaxLength = 24 };
     private readonly Label summary = new() { AutoSize = true };
     public CatSettings Value => new() { LeftPercent = left.Value, RightPercent = right.Value, MonitorIndex = monitor.SelectedIndex, Name = string.IsNullOrWhiteSpace(catName.Text) ? "Sneaker" : catName.Text.Trim() };
 
@@ -638,12 +638,13 @@ internal sealed class SettingsForm : Form
 {
     private readonly CatSettings current;
     private readonly MessagingService messaging;
-    private readonly TextBox catName = new() { Width = 490, MaxLength = 40 };
+    private readonly TextBox catName = new() { Width = 490, MaxLength = 24 };
     private readonly ComboBox monitor = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 490 };
     private readonly TrackBar left = new() { Minimum = 0, Maximum = 90, TickFrequency = 10, Width = 490 };
     private readonly TrackBar right = new() { Minimum = 10, Maximum = 100, TickFrequency = 10, Width = 490 };
-    private readonly TextBox ownCode = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
-    private readonly TextBox friendCode = new() { Multiline = true, ScrollBars = ScrollBars.Vertical };
+    private readonly TextBox userSearch = new() { Width = 390, MaxLength = 24 };
+    private readonly ListBox searchResults = new();
+    private readonly ListBox friendList = new();
     private readonly ListBox contacts = new();
     private readonly TextBox message = new() { Multiline = true, MaxLength = 500, ScrollBars = ScrollBars.Vertical };
     private readonly Label status = new() { AutoSize = true, ForeColor = Color.FromArgb(63, 94, 69), MaximumSize = new Size(350, 38) };
@@ -667,7 +668,8 @@ internal sealed class SettingsForm : Form
         catName.Text = string.IsNullOrWhiteSpace(current.Name) ? "Sneaker" : current.Name;
         left.Value = Math.Clamp(current.LeftPercent, 0, 90); right.Value = Math.Clamp(current.RightPercent, 10, 100);
         var stack = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(12) };
-        stack.Controls.Add(LabelFor("Name der Katze")); stack.Controls.Add(catName);
+        stack.Controls.Add(LabelFor("Eindeutiger Katzenname")); stack.Controls.Add(catName);
+        stack.Controls.Add(new Label { Text = "Damit können andere deine Katze finden. 3–24 Zeichen.", AutoSize = true, ForeColor = Color.FromArgb(84, 105, 88) });
         stack.Controls.Add(LabelFor("Bildschirm für die Katze", 13)); stack.Controls.Add(monitor);
         stack.Controls.Add(LabelFor("Linke Grenze", 13)); stack.Controls.Add(left);
         stack.Controls.Add(LabelFor("Rechte Grenze")); stack.Controls.Add(right);
@@ -676,42 +678,48 @@ internal sealed class SettingsForm : Form
         left.ValueChanged += (_, _) => ValidateRange(true); right.ValueChanged += (_, _) => ValidateRange(false); ValidateRange(true);
         general.Controls.Add(stack);
 
-        ownCode.SetBounds(15, 50, 520, 78); ownCode.Text = messaging.InviteCode;
-        ownCode.Click += (_, _) => ownCode.SelectAll();
-        Shown += async (_, _) => { Activate(); catName.Focus(); await messaging.StartAsync(); ownCode.Text = messaging.InviteCode; };
-        var copy = ButtonFor("Meinen Code kopieren", 15, 138, async () =>
+        Shown += async (_, _) =>
         {
-            try
-            {
-                status.Text = "Freundescode wird vorbereitet …";
-                await messaging.EnsureReadyAsync();
-                var code = messaging.InviteCode;
-                if (!code.StartsWith("TC1.", StringComparison.Ordinal)) throw new InvalidOperationException("Der Freundescode ist noch nicht verfügbar.");
-                ownCode.Text = code;
-                // Windows can briefly lock the clipboard. This overload retries
-                // instead of making the button appear to do nothing.
-                Clipboard.SetDataObject(code, true, 10, 100);
-                status.Text = "Freundescode wurde kopiert. ✓";
-            }
-            catch (Exception ex)
-            {
-                status.Text = "Kopieren fehlgeschlagen.";
-                MessageBox.Show($"Der Freundescode konnte nicht kopiert werden.\n\n{ex.Message}", "Taskbar Cat", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
+            Activate(); catName.Focus(); await messaging.StartAsync(); catName.Text = current.Name;
+            var refreshed = await messaging.RefreshFriendsAsync(); ReloadContacts(refreshed);
+        };
+        userSearch.SetBounds(15, 47, 390, 30);
+        var search = ButtonFor("Suchen", 420, 44, async () =>
+        {
+            try { status.Text = "Suche …"; var found = await messaging.SearchUsersAsync(userSearch.Text); searchResults.Items.Clear(); searchResults.Items.AddRange(found.Cast<object>().ToArray()); status.Text = found.Count == 0 ? "Keine passende Katze gefunden." : $"{found.Count} Treffer gefunden."; }
+            catch (Exception ex) { status.Text = ex.Message; }
         });
-        friendCode.SetBounds(15, 225, 520, 72);
-        var add = ButtonFor("Freund hinzufügen", 15, 307, async () => { try { var c = messaging.AddContact(friendCode.Text); contacts.Items.Add(c); friendCode.Clear(); status.Text = $"{c.Name} wurde hinzugefügt."; } catch (Exception ex) { MessageBox.Show(ex.Message, "Freundescode", MessageBoxButtons.OK, MessageBoxIcon.Information); } await Task.CompletedTask; });
-        friends.Controls.AddRange(new Control[] { PositionedLabel("Dein persönlicher Freundescode", 15, 18), ownCode, copy, PositionedLabel("Code eines Freundes einfügen", 15, 193), friendCode, add });
+        searchResults.SetBounds(15, 88, 520, 105);
+        var add = ButtonFor("Ausgewählte Katze hinzufügen", 15, 202, async () =>
+        {
+            if (searchResults.SelectedItem is not CatSearchResult result) { status.Text = "Bitte zuerst eine Katze auswählen."; return; }
+            try { var contact = await messaging.AddFriendAsync(result); ReloadContacts(current.Contacts); status.Text = $"{contact.Name} ist jetzt mit dir befreundet. 🐾"; }
+            catch (Exception ex) { status.Text = ex.Message; }
+        });
+        friendList.SetBounds(15, 285, 520, 105);
+        friends.Controls.AddRange(new Control[] { PositionedLabel("Katze über ihren Namen suchen", 15, 18), userSearch, search, searchResults, add, PositionedLabel("Deine Freundesliste", 15, 257), friendList });
 
         contacts.SetBounds(15, 46, 520, 115); contacts.Items.AddRange(current.Contacts.Cast<object>().ToArray());
         message.SetBounds(15, 208, 520, 110);
         var send = ButtonFor("Mit der Katze senden", 15, 334, async () => { if (contacts.SelectedItem is not CatContact c) { status.Text = "Bitte zuerst einen Freund auswählen."; return; } try { status.Text = "Wird verschlüsselt gesendet …"; await messaging.SendAsync(c, message.Text); message.Clear(); status.Text = "Nachricht ist unterwegs. 🐾"; } catch (Exception ex) { status.Text = ex.Message; } });
         chat.Controls.AddRange(new Control[] { PositionedLabel("An wen?", 15, 16), contacts, PositionedLabel("Nachricht (maximal 500 Zeichen)", 15, 177), message, send });
 
-        var save = ButtonFor("Speichern", 397, 519, async () => { current.Name = string.IsNullOrWhiteSpace(catName.Text) ? "Sneaker" : catName.Text.Trim(); current.MonitorIndex = monitor.SelectedIndex; current.LeftPercent = left.Value; current.RightPercent = right.Value; DialogResult = DialogResult.OK; Close(); await Task.CompletedTask; });
+        var save = ButtonFor("Speichern", 397, 519, async () =>
+        {
+            var previousName = current.Name; current.Name = string.IsNullOrWhiteSpace(catName.Text) ? "Sneaker" : catName.Text.Trim();
+            try { await messaging.EnsureReadyAsync(); await messaging.SyncNameAsync(); current.MonitorIndex = monitor.SelectedIndex; current.LeftPercent = left.Value; current.RightPercent = right.Value; DialogResult = DialogResult.OK; Close(); }
+            catch (Exception ex) { current.Name = previousName; status.Text = ex.Message; catName.Focus(); }
+        });
         var cancel = ButtonFor("Abbrechen", 495, 519, async () => { DialogResult = DialogResult.Cancel; Close(); await Task.CompletedTask; });
         status.Location = new Point(22, 524); Controls.AddRange(new Control[] { header, tabs, status, save, cancel });
         AcceptButton = save; CancelButton = cancel;
+
+        void ReloadContacts(IEnumerable<CatContact> values)
+        {
+            var list = values.OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+            friendList.Items.Clear(); friendList.Items.AddRange(list.Cast<object>().ToArray());
+            contacts.Items.Clear(); contacts.Items.AddRange(list.Cast<object>().ToArray());
+        }
     }
     private TabPage Page(string title) => new(title) { BackColor = BackColor, Padding = new Padding(12) };
     private static Label LabelFor(string text, int top = 3) => new() { Text = text, AutoSize = true, Margin = new Padding(3, top, 3, 2) };

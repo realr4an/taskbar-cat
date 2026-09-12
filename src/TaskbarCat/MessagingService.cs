@@ -13,6 +13,13 @@ internal sealed class CatContact
     public override string ToString() => Name;
 }
 
+internal sealed class CatSearchResult
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public override string ToString() => Name;
+}
+
 internal sealed class IncomingCatMessage
 {
     public string SenderName { get; init; } = "Freund";
@@ -40,7 +47,15 @@ internal sealed class MessagingService : IDisposable
 
     public async Task StartAsync()
     {
-        try { await EnsureIdentityAsync(); await SyncNameAsync(); poll.Start(); await PollAsync(); } catch { }
+        try
+        {
+            await EnsureIdentityAsync();
+            try { await SyncNameAsync(); } catch { }
+            try { await RefreshFriendsAsync(); } catch { }
+            poll.Start();
+            await PollAsync();
+        }
+        catch { }
     }
 
     public Task EnsureReadyAsync() => EnsureIdentityAsync();
@@ -50,7 +65,9 @@ internal sealed class MessagingService : IDisposable
         if (string.IsNullOrEmpty(settings.DeviceTokenProtected)) return;
         using var req = Authorized(HttpMethod.Put, "/v1/devices/me", JsonSerializer.Serialize(new { name = settings.Name }));
         using var response = await http.SendAsync(req);
-        response.EnsureSuccessStatusCode();
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict) throw new InvalidOperationException("Dieser Katzenname ist bereits vergeben.");
+        if (response.StatusCode == System.Net.HttpStatusCode.BadRequest) throw new InvalidOperationException("Der Katzenname muss 3–24 Zeichen lang sein und darf Buchstaben, Zahlen, Leerzeichen, Punkt, Minus und Unterstrich enthalten.");
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Der Katzenname konnte nicht gespeichert werden.");
     }
 
     public string InviteCode
@@ -78,6 +95,58 @@ internal sealed class MessagingService : IDisposable
         settings.Contacts.Add(contact);
         save();
         return contact;
+    }
+
+    public async Task<List<CatSearchResult>> SearchUsersAsync(string query)
+    {
+        query = query.Trim();
+        if (query.Length < 2) return new();
+        await EnsureIdentityAsync();
+        using var req = Authorized(HttpMethod.Get, "/v1/users/search?q=" + Uri.EscapeDataString(query), null);
+        using var response = await http.SendAsync(req);
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Die Suche ist gerade nicht erreichbar.");
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("users").EnumerateArray().Select(x => new CatSearchResult
+        {
+            Id = x.GetProperty("id").GetString()!,
+            Name = x.GetProperty("username").GetString()!
+        }).ToList();
+    }
+
+    public async Task<CatContact> AddFriendAsync(CatSearchResult result)
+    {
+        await EnsureIdentityAsync();
+        using var req = Authorized(HttpMethod.Post, "/v1/friends", JsonSerializer.Serialize(new { deviceId = result.Id }));
+        using var response = await http.SendAsync(req);
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Der Freund konnte nicht hinzugefügt werden.");
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var item = doc.RootElement.GetProperty("friend");
+        var contact = new CatContact { Id = item.GetProperty("id").GetString()!, Name = item.GetProperty("username").GetString()!, PublicKey = item.GetProperty("publicKey").GetString()! };
+        UpsertContact(contact);
+        return contact;
+    }
+
+    public async Task<List<CatContact>> RefreshFriendsAsync()
+    {
+        await EnsureIdentityAsync();
+        using var req = Authorized(HttpMethod.Get, "/v1/friends", null);
+        using var response = await http.SendAsync(req);
+        if (!response.IsSuccessStatusCode) return settings.Contacts;
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var contacts = doc.RootElement.GetProperty("friends").EnumerateArray().Select(x => new CatContact
+        {
+            Id = x.GetProperty("id").GetString()!, Name = x.GetProperty("username").GetString()!, PublicKey = x.GetProperty("publicKey").GetString()!
+        }).ToList();
+        settings.Contacts = contacts;
+        save();
+        return contacts;
+    }
+
+    private void UpsertContact(CatContact contact)
+    {
+        settings.Contacts.RemoveAll(x => x.Id == contact.Id);
+        settings.Contacts.Add(contact);
+        save();
     }
 
     public async Task SendAsync(CatContact recipient, string text)
@@ -114,6 +183,7 @@ internal sealed class MessagingService : IDisposable
         response.EnsureSuccessStatusCode();
         var registration = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         settings.DeviceId = registration.GetProperty("id").GetString()!;
+        if (registration.TryGetProperty("username", out var username)) settings.Name = username.GetString() ?? settings.Name;
         settings.DeviceTokenProtected = Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(registration.GetProperty("token").GetString()!), null, DataProtectionScope.CurrentUser));
         save();
     }
@@ -124,6 +194,9 @@ internal sealed class MessagingService : IDisposable
         busy = true;
         try
         {
+            // A newly added friendship is mutual. Refresh keys before reading
+            // messages so the other side can decrypt immediately while running.
+            try { await RefreshFriendsAsync(); } catch { }
             using var req = Authorized(HttpMethod.Get, "/v1/messages", null);
             using var response = await http.SendAsync(req);
             if (!response.IsSuccessStatusCode) return;
@@ -173,7 +246,8 @@ internal sealed class MessagingService : IDisposable
         using (var aes = new AesGcm(secret, 16)) aes.Decrypt(FromBase64Url(nonceText), cipher, FromBase64Url(tagText), plain, Encoding.UTF8.GetBytes(settings.DeviceId));
         var data = JsonDocument.Parse(plain).RootElement;
         if (data.GetProperty("senderId").GetString() != "admin") throw new CryptographicException();
-        return AcceptPayload(data, "Taskbar Cat Admin");
+        var senderName = data.TryGetProperty("senderName", out var name) ? name.GetString() ?? "Taskbar Cat Admin" : "Taskbar Cat Admin";
+        return AcceptPayload(data, senderName[..Math.Min(senderName.Length, 40)]);
     }
 
     private IncomingCatMessage AcceptPayload(JsonElement data, string senderName)

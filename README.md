@@ -10,10 +10,10 @@ Taskbar Cat bringt **Sneaker**, eine kleine animierte schwarze Pixelkatze, auf d
 - gelegentliche Sprünge, Putzpausen und Sprechblasen
 - frei verschiebbar per Drag-and-drop
 - auswählbarer Bildschirm und Bewegungsbereich
-- Name der Katze konfigurierbar, Standard: Sneaker
+- weltweit eindeutiger Katzenname, Standard: Sneaker mit automatischem Zusatz falls bereits vergeben
 - Tray-Menü für Einstellungen, Pause und Beenden
 - automatische, geprüfte Updates aus GitHub Releases
-- kostenloser Freundescode zum Verbinden zweier Katzen
+- Namenssuche mit zehn ähnlichen Treffern und gegenseitiger Freundesliste
 - Ende-zu-Ende verschlüsselte Nachrichten als dynamische Gedankenblasen
 
 ## Download
@@ -22,7 +22,7 @@ Im Bereich **Releases** liegt immer die aktuelle `TaskbarKatze.exe`. Weitere Ins
 
 ## Private Katzenpost
 
-Im Katzenmenü unter **Freunde** kann der eigene Freundescode kopiert und der Code einer anderen Person eingefügt werden. Danach lassen sich Nachrichten mit bis zu 500 Zeichen senden. Die Gedankenblase passt Breite, Höhe und Zeilenumbrüche automatisch an den verfügbaren Bildschirm an.
+Im Katzenmenü unter **Freunde** sucht man ab zwei Zeichen nach einem eindeutigen Katzennamen. Die zehn ähnlichsten Treffer werden angezeigt; ein Klick verbindet beide Katzen gegenseitig. Danach lassen sich Nachrichten mit bis zu 500 Zeichen senden. Die Gedankenblase passt Breite, Höhe und Zeilenumbrüche automatisch an den verfügbaren Bildschirm an.
 
 Nachrichten werden bereits auf dem PC mit ECDH P-256 und AES-256-GCM verschlüsselt. Der private Schlüssel und das Geräte-Token sind per Windows DPAPI an das jeweilige Windows-Benutzerkonto gebunden. Der Vermittlungsdienst sieht nur verschlüsselte Nachrichten, löscht zugestellte Inhalte und verwirft nicht zugestellte Inhalte spätestens nach sieben Tagen. Unbekannte Absender werden nicht angezeigt.
 
@@ -30,7 +30,7 @@ Der Dienst nutzt ausschließlich die kostenlosen Kontingente von Cloudflare Work
 
 ## Admin-Dashboard
 
-Unter der geschützten `/admin`-Adresse kann der Betreiber eine registrierte Katze auswählen und ihr eine Gedankenblasen-Nachricht schicken. Der Zugang besitzt ein separates, zufälliges Admin-Passwort, ein `Secure`/`HttpOnly`/`SameSite=Strict`-Sitzungscookie, CSRF-Schutz und eine Begrenzung fehlgeschlagener Anmeldungen. Admin-Nachrichten werden für das Zielgerät verschlüsselt und mit einem fest in der App verankerten P-256-Administratorschlüssel signiert.
+Unter der geschützten `/admin`-Adresse kann der Betreiber eine registrierte Katze nach ihrem eindeutigen Namen auswählen, seinen Absendernamen hinterlegen und ihr eine Gedankenblasen-Nachricht schicken. Der Zugang besitzt ein separates, zufälliges Admin-Passwort, ein `Secure`/`HttpOnly`/`SameSite=Strict`-Sitzungscookie, CSRF-Schutz und eine Begrenzung fehlgeschlagener Anmeldungen. Admin-Nachrichten werden für das Zielgerät verschlüsselt und mit einem fest in der App verankerten P-256-Administratorschlüssel signiert.
 
 ## Bedienung
 
