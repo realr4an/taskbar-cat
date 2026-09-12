@@ -36,6 +36,12 @@ internal sealed class CatSettings
     public int RightPercent { get; set; } = 96;
     public int MonitorIndex { get; set; }
     public string Name { get; set; } = "Sneaker";
+    public string DeviceId { get; set; } = "";
+    public string PublicKey { get; set; } = "";
+    public string PrivateKeyProtected { get; set; } = "";
+    public string DeviceTokenProtected { get; set; } = "";
+    public List<CatContact> Contacts { get; set; } = new();
+    public List<string> SeenMessageIds { get; set; } = new();
 }
 
 internal sealed class CatContext : ApplicationContext
@@ -43,6 +49,7 @@ internal sealed class CatContext : ApplicationContext
     private readonly CatWindow cat;
     private readonly NotifyIcon tray;
     private readonly ContextMenuStrip menu;
+    private readonly MessagingService messaging;
     private readonly string settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskbarCat", "settings.json");
     private CatSettings settings;
 
@@ -51,9 +58,11 @@ internal sealed class CatContext : ApplicationContext
         settings = LoadSettings();
         File.AppendAllText(startupLog, "settings ready\n");
         cat = new CatWindow(settings);
+        messaging = new MessagingService(settings, SaveSettings);
+        messaging.MessageReceived += message => cat.ShowThought($"{message.SenderName}:\n{message.Text}");
         File.AppendAllText(startupLog, "cat window constructed\n");
         menu = new ContextMenuStrip();
-        menu.Items.Add("Einstellungen…", null, (_, _) => OpenSettings());
+        menu.Items.Add("Katzenmenü…", null, (_, _) => OpenSettings());
         menu.Items.Add("Katze pausieren", null, (_, _) => { cat.Paused = !cat.Paused; menu.Items[1].Text = cat.Paused ? "Katze weiterlaufen lassen" : "Katze pausieren"; });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Beenden", null, (_, _) => CloseApp());
@@ -68,13 +77,14 @@ internal sealed class CatContext : ApplicationContext
         cat.MouseUp += (_, e) => { if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position); };
         tray.DoubleClick += (_, _) => OpenSettings();
         cat.Show();
+        _ = messaging.StartAsync();
         File.AppendAllText(startupLog, "cat window shown\n");
         _ = AutoUpdater.CheckAndApplyAsync(cat, CloseApp);
     }
 
     private void OpenSettings()
     {
-        using var dialog = new RangeForm(settings);
+        using var dialog = new SettingsForm(settings, messaging);
         if (dialog.ShowDialog() == DialogResult.OK)
         {
             settings = dialog.Value;
@@ -102,6 +112,8 @@ internal sealed class CatContext : ApplicationContext
         {
             var loaded = JsonSerializer.Deserialize<CatSettings>(File.ReadAllText(settingsPath)) ?? new();
             if (string.IsNullOrWhiteSpace(loaded.Name) || loaded.Name == "Minka") loaded.Name = "Sneaker";
+            loaded.Contacts ??= new();
+            loaded.SeenMessageIds ??= new();
             return loaded;
         }
         catch { return new(); }
@@ -110,13 +122,16 @@ internal sealed class CatContext : ApplicationContext
     private void SaveSettings()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
-        File.WriteAllText(settingsPath, JsonSerializer.Serialize(settings));
+        var temporary = settingsPath + ".new";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(settings));
+        File.Move(temporary, settingsPath, true);
     }
 
     protected override void ExitThreadCore()
     {
         tray.Visible = false;
         tray.Dispose();
+        messaging.Dispose();
         cat.Close();
         base.ExitThreadCore();
     }
@@ -146,6 +161,7 @@ internal sealed class CatWindow : Form
     private bool dragging, hovering, movedWhileDragging, journeyActive, jumpedThisJourney, didMidRoutine;
     private Point dragOffset, pressScreenPoint;
     private Bitmap? displayFrame;
+    private ThoughtBubbleForm? thoughtBubble;
     public bool Paused;
 
     public CatWindow(CatSettings initial)
@@ -246,6 +262,14 @@ internal sealed class CatWindow : Form
             }
         }
         Location = new Point((int)x, area.Bottom - Height);
+    }
+
+    public void ShowThought(string text)
+    {
+        if (InvokeRequired) { BeginInvoke(() => ShowThought(text)); return; }
+        thoughtBubble?.Close();
+        thoughtBubble = new ThoughtBubbleForm(this, text);
+        thoughtBubble.Show();
     }
 
     private Rectangle CurrentArea()
@@ -546,6 +570,7 @@ internal sealed class CatWindow : Form
         if (disposing)
         {
             timer.Dispose();
+            thoughtBubble?.Close();
             foreach (var f in walkRight) f?.Dispose();
             foreach (var f in walkLeft) f?.Dispose();
             foreach (var f in sleepRight) f?.Dispose();
@@ -605,4 +630,105 @@ internal sealed class RangeForm : Form
         UpdateSummary();
     }
     private void UpdateSummary() => summary.Text = $"Die Katze nutzt {left.Value}% bis {right.Value}% der unteren Bildschirmkante.";
+}
+
+internal sealed class SettingsForm : Form
+{
+    private readonly CatSettings current;
+    private readonly MessagingService messaging;
+    private readonly TextBox catName = new() { Width = 490, MaxLength = 40 };
+    private readonly ComboBox monitor = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 490 };
+    private readonly TrackBar left = new() { Minimum = 0, Maximum = 90, TickFrequency = 10, Width = 490 };
+    private readonly TrackBar right = new() { Minimum = 10, Maximum = 100, TickFrequency = 10, Width = 490 };
+    private readonly TextBox ownCode = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
+    private readonly TextBox friendCode = new() { Multiline = true, ScrollBars = ScrollBars.Vertical };
+    private readonly ListBox contacts = new();
+    private readonly TextBox message = new() { Multiline = true, MaxLength = 500, ScrollBars = ScrollBars.Vertical };
+    private readonly Label status = new() { AutoSize = true, ForeColor = Color.FromArgb(63, 94, 69), MaximumSize = new Size(350, 38) };
+    public CatSettings Value => current;
+
+    public SettingsForm(CatSettings current, MessagingService messaging)
+    {
+        this.current = current; this.messaging = messaging;
+        Text = $"{current.Name} · Katzenmenü";
+        FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = MinimizeBox = false;
+        StartPosition = FormStartPosition.CenterScreen; ClientSize = new Size(610, 570);
+        BackColor = Color.FromArgb(246, 242, 234); Font = new Font("Segoe UI", 10);
+        var header = new Label { Text = "🐾  Taskbar Cat", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = Color.FromArgb(35, 52, 39), AutoSize = true, Location = new Point(22, 14) };
+        var tabs = new TabControl { Location = new Point(18, 56), Size = new Size(574, 448) };
+        var general = Page("Meine Katze"); var friends = Page("Freunde"); var chat = Page("Nachricht");
+        tabs.TabPages.AddRange(new[] { general, friends, chat });
+
+        foreach (var s in Screen.AllScreens) monitor.Items.Add($"{s.DeviceName} ({s.Bounds.Width} × {s.Bounds.Height})");
+        monitor.SelectedIndex = Math.Clamp(current.MonitorIndex, 0, monitor.Items.Count - 1);
+        catName.Text = string.IsNullOrWhiteSpace(current.Name) ? "Sneaker" : current.Name;
+        left.Value = Math.Clamp(current.LeftPercent, 0, 90); right.Value = Math.Clamp(current.RightPercent, 10, 100);
+        var stack = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(12) };
+        stack.Controls.Add(LabelFor("Name der Katze")); stack.Controls.Add(catName);
+        stack.Controls.Add(LabelFor("Bildschirm für die Katze", 13)); stack.Controls.Add(monitor);
+        stack.Controls.Add(LabelFor("Linke Grenze", 13)); stack.Controls.Add(left);
+        stack.Controls.Add(LabelFor("Rechte Grenze")); stack.Controls.Add(right);
+        var rangeSummary = LabelFor(""); stack.Controls.Add(rangeSummary);
+        void ValidateRange(bool changedLeft) { if (right.Value - left.Value < 10) { if (changedLeft) right.Value = Math.Min(100, left.Value + 10); else left.Value = Math.Max(0, right.Value - 10); } rangeSummary.Text = $"Bewegungsbereich: {left.Value}% bis {right.Value}%"; }
+        left.ValueChanged += (_, _) => ValidateRange(true); right.ValueChanged += (_, _) => ValidateRange(false); ValidateRange(true);
+        general.Controls.Add(stack);
+
+        ownCode.SetBounds(15, 50, 520, 78); ownCode.Text = messaging.InviteCode;
+        Shown += async (_, _) => { await messaging.StartAsync(); ownCode.Text = messaging.InviteCode; };
+        var copy = ButtonFor("Meinen Code kopieren", 15, 138, async () => { Clipboard.SetText(messaging.InviteCode); status.Text = "Freundescode kopiert."; await Task.CompletedTask; });
+        friendCode.SetBounds(15, 225, 520, 72);
+        var add = ButtonFor("Freund hinzufügen", 15, 307, async () => { try { var c = messaging.AddContact(friendCode.Text); contacts.Items.Add(c); friendCode.Clear(); status.Text = $"{c.Name} wurde hinzugefügt."; } catch (Exception ex) { MessageBox.Show(ex.Message, "Freundescode", MessageBoxButtons.OK, MessageBoxIcon.Information); } await Task.CompletedTask; });
+        friends.Controls.AddRange(new Control[] { PositionedLabel("Dein persönlicher Freundescode", 15, 18), ownCode, copy, PositionedLabel("Code eines Freundes einfügen", 15, 193), friendCode, add });
+
+        contacts.SetBounds(15, 46, 520, 115); contacts.Items.AddRange(current.Contacts.Cast<object>().ToArray());
+        message.SetBounds(15, 208, 520, 110);
+        var send = ButtonFor("Mit der Katze senden", 15, 334, async () => { if (contacts.SelectedItem is not CatContact c) { status.Text = "Bitte zuerst einen Freund auswählen."; return; } try { status.Text = "Wird verschlüsselt gesendet …"; await messaging.SendAsync(c, message.Text); message.Clear(); status.Text = "Nachricht ist unterwegs. 🐾"; } catch (Exception ex) { status.Text = ex.Message; } });
+        chat.Controls.AddRange(new Control[] { PositionedLabel("An wen?", 15, 16), contacts, PositionedLabel("Nachricht (maximal 500 Zeichen)", 15, 177), message, send });
+
+        var save = ButtonFor("Speichern", 397, 519, async () => { current.Name = string.IsNullOrWhiteSpace(catName.Text) ? "Sneaker" : catName.Text.Trim(); current.MonitorIndex = monitor.SelectedIndex; current.LeftPercent = left.Value; current.RightPercent = right.Value; DialogResult = DialogResult.OK; Close(); await Task.CompletedTask; });
+        var cancel = ButtonFor("Abbrechen", 495, 519, async () => { DialogResult = DialogResult.Cancel; Close(); await Task.CompletedTask; });
+        status.Location = new Point(22, 524); Controls.AddRange(new Control[] { header, tabs, status, save, cancel });
+        AcceptButton = save; CancelButton = cancel;
+    }
+    private TabPage Page(string title) => new(title) { BackColor = BackColor, Padding = new Padding(12) };
+    private static Label LabelFor(string text, int top = 3) => new() { Text = text, AutoSize = true, Margin = new Padding(3, top, 3, 2) };
+    private static Label PositionedLabel(string text, int x, int y) => new() { Text = text, AutoSize = true, Location = new Point(x, y) };
+    private static Button ButtonFor(string text, int x, int y, Func<Task> action)
+    {
+        var b = new Button { Text = text, Location = new Point(x, y), AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(220, 236, 219), ForeColor = Color.FromArgb(30, 57, 37), Padding = new Padding(6, 2, 6, 2) };
+        b.FlatAppearance.BorderColor = Color.FromArgb(112, 145, 114); b.Click += async (_, _) => await action(); return b;
+    }
+}
+
+internal sealed class ThoughtBubbleForm : Form
+{
+    private readonly Form cat; private readonly string text;
+    private readonly System.Windows.Forms.Timer timer = new() { Interval = 50 }; private int remaining;
+    public ThoughtBubbleForm(Form cat, string text)
+    {
+        this.cat = cat; this.text = text.Length > 560 ? text[..560] : text;
+        FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; BackColor = Color.Magenta; TransparencyKey = Color.Magenta; DoubleBuffered = true;
+        using var font = new Font("Segoe UI", 10);
+        var measured = TextRenderer.MeasureText(this.text, font, new Size(380, 1000), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
+        ClientSize = new Size(Math.Clamp(measured.Width + 40, 150, 420), Math.Clamp(measured.Height + 48, 76, 430));
+        remaining = Math.Clamp(180 + this.text.Length * 3, 200, 700);
+        timer.Tick += (_, _) => { if (cat.IsDisposed || --remaining <= 0) Close(); else Reposition(); };
+        Shown += (_, _) => { Reposition(); timer.Start(); };
+    }
+    protected override bool ShowWithoutActivation => true;
+    protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x00000080 | 0x00000020; return cp; } }
+    private void Reposition() { var area = Screen.FromControl(cat).WorkingArea; Location = new Point(Math.Clamp(cat.Left + cat.Width / 2 - Width / 2, area.Left, area.Right - Width), Math.Max(area.Top, cat.Top - Height + 20)); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var body = new Rectangle(3, 3, Width - 7, Height - 25); int r = 18;
+        using var path = new GraphicsPath(); path.AddArc(body.X, body.Y, r, r, 180, 90); path.AddArc(body.Right-r, body.Y, r, r, 270, 90); path.AddArc(body.Right-r, body.Bottom-r, r, r, 0, 90); path.AddArc(body.X, body.Bottom-r, r, r, 90, 90); path.CloseFigure();
+        using var fill = new SolidBrush(Color.FromArgb(252, 255, 253)); using var border = new Pen(Color.FromArgb(45, 65, 49), 2);
+        e.Graphics.FillPath(fill, path); e.Graphics.DrawPath(border, path);
+        var tail = new[] { new Point(Width / 2 - 8, Height - 25), new Point(Width / 2 + 2, Height - 4), new Point(Width / 2 + 12, Height - 25) };
+        e.Graphics.FillPolygon(fill, tail); e.Graphics.DrawLines(border, tail);
+        using var font = new Font("Segoe UI", 10);
+        TextRenderer.DrawText(e.Graphics, text, font, new Rectangle(18, 13, Width - 36, Height - 48), Color.FromArgb(28, 38, 31), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+    }
+    protected override void Dispose(bool disposing) { if (disposing) timer.Dispose(); base.Dispose(disposing); }
 }

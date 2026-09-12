@@ -1,0 +1,12 @@
+{
+  "name": "taskbar-cat-messaging",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "test": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "wrangler": "latest"
+  }
+}

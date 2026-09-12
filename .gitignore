@@ -4,5 +4,8 @@ obj/
 *.user
 *.suo
 artifacts/
+artifacts-test/
 publish/
-
+node_modules/
+.wrangler/
+dist-dry/

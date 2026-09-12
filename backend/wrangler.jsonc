@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "taskbar-cat-messaging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-12",
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "taskbar-cat-messaging",
+    "database_id": "0ca3f43c-92d6-4e67-bc94-3fafa049f2d8",
+    "migrations_dir": "migrations"
+  }]
+}

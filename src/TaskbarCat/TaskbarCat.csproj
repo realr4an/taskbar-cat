@@ -18,4 +18,7 @@
     <EmbeddedResource Include="Assets\sneaker-jump.png" />
     <EmbeddedResource Include="Assets\sneaker-groom.png" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
+  </ItemGroup>
 </Project>
