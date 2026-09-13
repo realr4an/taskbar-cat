@@ -11,6 +11,12 @@ internal static class Program
     private static void Main(string[] args)
     {
         if (AutoUpdater.TryHandleInstallerMode(args)) return;
+        using var singleInstance = new SingleInstanceCoordinator();
+        if (!singleInstance.ReplaceExisting(TimeSpan.FromSeconds(12)))
+        {
+            MessageBox.Show("Die bereits laufende Katze konnte nicht beendet werden.", "Taskbar Cat", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         AutoUpdater.ScheduleCleanup(args);
         var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TaskbarCat");
         Directory.CreateDirectory(logDir);
@@ -21,7 +27,9 @@ internal static class Program
             ApplicationConfiguration.Initialize();
             File.AppendAllText(log, "configuration ready\n");
             bool settingsMode = args.Contains("--settings", StringComparer.OrdinalIgnoreCase);
-            Application.Run(new CatContext(log, settingsMode, settingsMode));
+            var context = new CatContext(log, settingsMode, settingsMode);
+            singleInstance.WatchForReplacement(context.CloseForReplacement);
+            Application.Run(context);
         }
         catch (Exception ex)
         {
@@ -107,6 +115,21 @@ internal sealed class CatContext : ApplicationContext
     {
         tray.Visible = false;
         ExitThread();
+    }
+
+    public void CloseForReplacement()
+    {
+        if (!cat.IsHandleCreated || cat.IsDisposed) return;
+        try
+        {
+            cat.BeginInvoke(() =>
+            {
+                foreach (Form form in Application.OpenForms.Cast<Form>().ToArray())
+                    if (!form.IsDisposed) form.Close();
+                CloseApp();
+            });
+        }
+        catch (InvalidOperationException) { }
     }
 
     private CatSettings LoadSettings()

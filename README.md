@@ -44,6 +44,7 @@ Die Animationen bestehen aus handabgestimmten Einzelbildern. Die App bewegt die 
 - Online-Status und verständliche „zuletzt online“-Angabe bei Freunden
 - verschlüsselte Nachrichten in automatisch wachsenden Gedankenblasen und einem Chatfenster
 - Tray-Menü mit Einstellungen, Pause und Beenden
+- immer nur eine laufende Instanz; ein erneuter Start löst die alte Katze sauber ab
 - automatische Aktualisierung über geprüfte GitHub-Releases
 - eigenständige EXE ohne separate .NET-Installation
 
