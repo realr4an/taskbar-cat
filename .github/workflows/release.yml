@@ -1,16 +1,21 @@
-name: Build latest release
+name: Test and release
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
+concurrency:
+  group: taskbar-cat-release
+  cancel-in-progress: false
 
 jobs:
-  release:
+  quality:
+    name: Automated tests
     runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,9 +25,50 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
-      - name: Publish single EXE
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Restore desktop dependencies
+        run: dotnet restore tests/TaskbarCat.Tests/TaskbarCat.Tests.csproj
+
+      - name: Build desktop app with warnings as errors
+        run: dotnet build src/TaskbarCat/TaskbarCat.csproj -c Release --no-restore -warnaserror
+
+      - name: Run desktop behavior and sprite tests
+        run: dotnet run --project tests/TaskbarCat.Tests/TaskbarCat.Tests.csproj -c Release
+
+      - name: Install backend dependencies reproducibly
+        working-directory: backend
+        run: npm ci
+
+      - name: Type-check Cloudflare backend
+        working-directory: backend
+        run: npm test
+
+  release:
+    name: Package, smoke-test and release
+    needs: quality
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Publish self-contained Windows x86 EXE
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $version = "1.0.${{ github.run_number }}"
           dotnet publish src/TaskbarCat/TaskbarCat.csproj `
             -c Release -r win-x86 --self-contained true `
@@ -37,16 +83,49 @@ jobs:
           "$hash  TaskbarKatze.exe" | Set-Content artifacts/TaskbarKatze.exe.sha256 -Encoding ascii
           $version | Set-Content artifacts/version.txt -Encoding ascii
 
+      - name: Verify packaged artifact and checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Resolve-Path 'artifacts/TaskbarKatze.exe'
+          if ((Get-Item $exe).Length -lt 1MB) { throw 'Die veröffentlichte EXE ist unerwartet klein.' }
+          $expected = ((Get-Content 'artifacts/TaskbarKatze.exe.sha256' -Raw).Trim() -split '\s+')[0]
+          $actual = (Get-FileHash $exe -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw 'Die SHA-256-Prüfsumme stimmt nicht.' }
+          $expectedVersion = (Get-Content 'artifacts/version.txt' -Raw).Trim()
+          $actualVersion = (Get-Item $exe).VersionInfo.ProductVersion.Split('+')[0]
+          if ($actualVersion -ne $expectedVersion) { throw "Falsche EXE-Version: $actualVersion statt $expectedVersion" }
+
+      - name: Smoke-test the packaged settings window
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Resolve-Path 'artifacts/TaskbarKatze.exe'
+          $process = Start-Process -FilePath $exe -ArgumentList '--settings' -PassThru
+          try {
+            Start-Sleep -Seconds 4
+            if ($process.HasExited) { throw "Die EXE wurde beim Start mit Code $($process.ExitCode) beendet." }
+            $log = Join-Path $env:LOCALAPPDATA 'TaskbarCat/startup.log'
+            if (!(Test-Path $log)) { throw 'Das Startprotokoll wurde nicht angelegt.' }
+            $content = Get-Content $log -Raw
+            if ($content -notmatch 'configuration ready' -or $content -notmatch 'cat window shown') {
+              throw 'Das Einstellungsfenster wurde nicht vollständig initialisiert.'
+            }
+          }
+          finally {
+            if (!$process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
       - name: Create versioned release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = Get-Content artifacts/version.txt -Raw
-          $version = $version.Trim()
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content artifacts/version.txt -Raw).Trim()
           gh release create "v$version" `
             artifacts/TaskbarKatze.exe `
             artifacts/TaskbarKatze.exe.sha256 `
             artifacts/version.txt `
             --title "Taskbar Cat v$version" `
-            --notes "Automatisch erstellte aktuelle Windows-Version."
+            --notes "Automatisch erstellt, getestet und als eigenständige Windows-Version veröffentlicht."

@@ -715,9 +715,7 @@ internal sealed class SettingsForm : Form
         });
         userSearch.KeyDown += (_, e) =>
         {
-            if (e.KeyCode != Keys.Enter) return;
-            e.SuppressKeyPress = true;
-            search.PerformClick();
+            SettingsKeyboard.HandleSearch(e, search.PerformClick);
         };
         searchResults.SetBounds(15, 88, 520, 105);
         var add = ButtonFor("Ausgewählte Katze hinzufügen", 15, 202, async () =>
@@ -740,9 +738,7 @@ internal sealed class SettingsForm : Form
         });
         message.KeyDown += (_, e) =>
         {
-            if (e.KeyCode != Keys.Enter || e.Shift) return;
-            e.SuppressKeyPress = true;
-            send.PerformClick();
+            SettingsKeyboard.HandleMessage(e, send.PerformClick);
         };
         chat.Controls.AddRange(new Control[] { PositionedLabel("Chats", 10, 12), contacts, chatHistory, message, send });
         contacts.SelectedIndexChanged += (_, _) => RenderConversation();
@@ -808,6 +804,23 @@ internal sealed class SettingsForm : Form
     {
         var b = new Button { Text = text, Location = new Point(x, y), AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(220, 236, 219), ForeColor = Color.FromArgb(30, 57, 37), Padding = new Padding(6, 2, 6, 2) };
         b.FlatAppearance.BorderColor = Color.FromArgb(112, 145, 114); b.Click += async (_, _) => await action(); return b;
+    }
+}
+
+internal static class SettingsKeyboard
+{
+    internal static void HandleSearch(KeyEventArgs e, Action confirm)
+    {
+        if (e.KeyCode != Keys.Enter) return;
+        e.SuppressKeyPress = true;
+        confirm();
+    }
+
+    internal static void HandleMessage(KeyEventArgs e, Action confirm)
+    {
+        if (e.KeyCode != Keys.Enter || e.Shift) return;
+        e.SuppressKeyPress = true;
+        confirm();
     }
 }
 

@@ -3,6 +3,7 @@
 Eine kleine schwarze Pixelkatze für die Windows-11-Taskleiste. **Sneaker** schläft am Bildschirmrand, wacht beim Darüberfahren mit der Maus auf und beginnt nach einem Klick ihre Runde. Sie kann laufen, springen, sich putzen und Nachrichten anderer Katzen als Gedankenblase anzeigen.
 
 [![Latest release](https://img.shields.io/github/v/release/realr4an/taskbar-cat?label=Download&color=5c8f63)](https://github.com/realr4an/taskbar-cat/releases/latest)
+[![Test and release](https://github.com/realr4an/taskbar-cat/actions/workflows/release.yml/badge.svg)](https://github.com/realr4an/taskbar-cat/actions/workflows/release.yml)
 [![Windows 11](https://img.shields.io/badge/Windows-11-357ec7)](#download)
 [![License: MIT](https://img.shields.io/badge/License-MIT-6b7280.svg)](LICENSE)
 
@@ -114,7 +115,7 @@ taskbar-cat/
 └─ LICENSE                  MIT-Lizenz
 ```
 
-Die Desktop-App verwendet Windows Forms auf .NET 9. Das schlanke Backend läuft als Cloudflare Worker mit D1. Jeder Push auf `main` erstellt automatisiert eine eigenständige Windows-EXE und ein versioniertes GitHub-Release.
+Die Desktop-App verwendet Windows Forms auf .NET 9. Das schlanke Backend läuft als Cloudflare Worker mit D1. Jeder Push auf `main` durchläuft zuerst die automatischen Desktop-, Sprite- und Backend-Prüfungen. Nur wenn alle Tests, die Paketprüfung und der Starttest erfolgreich sind, erstellt GitHub eine eigenständige Windows-EXE und ein versioniertes Release.
 
 ## Lokal entwickeln
 
