@@ -713,6 +713,12 @@ internal sealed class SettingsForm : Form
             try { status.Text = "Suche …"; var found = await messaging.SearchUsersAsync(userSearch.Text); searchResults.Items.Clear(); searchResults.Items.AddRange(found.Cast<object>().ToArray()); status.Text = found.Count == 0 ? "Keine passende Katze gefunden." : $"{found.Count} Treffer gefunden."; }
             catch (Exception ex) { status.Text = ex.Message; }
         });
+        userSearch.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Enter) return;
+            e.SuppressKeyPress = true;
+            search.PerformClick();
+        };
         searchResults.SetBounds(15, 88, 520, 105);
         var add = ButtonFor("Ausgewählte Katze hinzufügen", 15, 202, async () =>
         {
@@ -732,6 +738,12 @@ internal sealed class SettingsForm : Form
             try { status.Text = "Wird Ende-zu-Ende verschlüsselt …"; await messaging.SendAsync(c, message.Text); message.Clear(); RenderConversation(); status.Text = "Gesendet. 🐾"; }
             catch (Exception ex) { status.Text = ex.Message; }
         });
+        message.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Enter || e.Shift) return;
+            e.SuppressKeyPress = true;
+            send.PerformClick();
+        };
         chat.Controls.AddRange(new Control[] { PositionedLabel("Chats", 10, 12), contacts, chatHistory, message, send });
         contacts.SelectedIndexChanged += (_, _) => RenderConversation();
         Action<string> conversationChanged = contactId => { if (contacts.SelectedItem is CatContact selected && selected.Id == contactId) RenderConversation(); };
@@ -748,7 +760,9 @@ internal sealed class SettingsForm : Form
         });
         var cancel = ButtonFor("Abbrechen", 495, 519, async () => { DialogResult = DialogResult.Cancel; Close(); await Task.CompletedTask; });
         status.Location = new Point(22, 524); Controls.AddRange(new Control[] { header, tabs, status, save, cancel });
-        AcceptButton = save; CancelButton = cancel;
+        // Inputs own their Enter behavior. There is intentionally no global
+        // Accept/Cancel button, so Enter or Escape never closes this window.
+        AcceptButton = null; CancelButton = null;
 
         void ReloadContacts(IEnumerable<CatContact> values)
         {

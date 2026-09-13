@@ -32,6 +32,8 @@ Die Animationen bestehen aus handabgestimmten Einzelbildern. Die App bewegt die 
 | Eine Weile warten | Sie macht Putzpausen, miaut oder legt sich wieder schlafen. |
 | Tray-Symbol öffnen | Katzenmenü anzeigen, pausieren oder die App beenden. |
 
+Im Katzenmenü bestätigt **Enter** die Namenssuche oder sendet die eingegebene Chatnachricht; **Umschalt+Enter** fügt im Chat einen Zeilenumbruch ein. Das Fenster wird ausschließlich über **Speichern**, **Abbrechen** oder das **X** geschlossen.
+
 ## Funktionen
 
 - transparente, nicht störende Desktop-Figur oberhalb der Taskleiste
