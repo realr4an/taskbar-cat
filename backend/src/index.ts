@@ -93,9 +93,13 @@ export default {
         const ipKey = "admin-login:" + await sha256(request.headers.get("cf-connecting-ip") ?? "unknown");
         const attempts = await env.DB.prepare("SELECT COUNT(*) n FROM rate_events WHERE event_key=? AND created_at>?").bind(ipKey, Date.now() - 3600000).first<{n:number}>();
         if ((attempts?.n ?? 0) >= 10) return page("<h1>Zu viele Versuche</h1><p>Bitte später erneut versuchen.</p>", 429);
-        await env.DB.prepare("INSERT INTO rate_events(event_key,created_at) VALUES(?,?)").bind(ipKey, Date.now()).run();
         const form = await request.formData();
-        if (!await passwordMatches(env.ADMIN_PASSWORD, String(form.get("password") ?? ""))) return page('<h1>Anmeldung fehlgeschlagen</h1><p><a href="/admin">Erneut versuchen</a></p>', 401);
+        const suppliedPassword = String(form.get("password") ?? "").trim();
+        if (!await passwordMatches(env.ADMIN_PASSWORD, suppliedPassword)) {
+          await env.DB.prepare("INSERT INTO rate_events(event_key,created_at) VALUES(?,?)").bind(ipKey, Date.now()).run();
+          return page('<h1>Anmeldung fehlgeschlagen</h1><p>Das Passwort stimmt nicht. Bitte erneut eingeben.</p><p><a href="/admin">Zurück zur Anmeldung</a></p>', 401);
+        }
+        await env.DB.prepare("DELETE FROM rate_events WHERE event_key=?").bind(ipKey).run();
         const session = await createSession(env);
         return new Response(null, { status: 303, headers: { location: "/admin", "set-cookie": `tc_admin=${session}; Path=/admin; Secure; HttpOnly; SameSite=Strict; Max-Age=28800`, "cache-control": "no-store" } });
       }
