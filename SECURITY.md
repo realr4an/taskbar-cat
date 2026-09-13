@@ -5,6 +5,7 @@
 - Die öffentliche Namenssuche liefert nur Geräte-ID und eindeutigen Katzennamen; maximal zehn Treffer pro Anfrage.
 - Öffentliche P-256-Schlüssel werden erst nach dem Hinzufügen innerhalb der gegenseitigen Freundesliste übertragen.
 - Private Schlüssel und Geräte-Token verlassen den PC nicht. Sie werden mit Windows DPAPI für den aktuellen Windows-Benutzer geschützt.
+- Der lokale Chatverlauf wird vollständig mit Windows DPAPI verschlüsselt und atomar in einer separaten Datei gespeichert.
 - Nachrichten werden lokal mit ECDH P-256 und AES-256-GCM verschlüsselt und authentifiziert.
 - Nur in der serverseitigen Freundesliste bestätigte und lokal synchronisierte Absender werden akzeptiert.
 - Nachrichten-IDs und Zeitstempel begrenzen Replay-Angriffe; akzeptierte IDs werden lokal zwischengespeichert.

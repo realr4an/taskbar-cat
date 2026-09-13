@@ -22,8 +22,11 @@ internal sealed class CatSearchResult
 
 internal sealed class IncomingCatMessage
 {
+    public string SenderId { get; init; } = "";
     public string SenderName { get; init; } = "Freund";
     public string Text { get; init; } = "";
+    public string MessageId { get; init; } = "";
+    public long SentAt { get; init; }
 }
 
 internal sealed class MessagingService : IDisposable
@@ -33,10 +36,12 @@ internal sealed class MessagingService : IDisposable
     private const string AdminPublicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEv7R5poB3XHMt/PrUMzzJirpLc9F6m/Bw+OEvV3kbDqfjMtoNAb51iKF0wRjSLFYqQvgCbf5fAbuylDNIuElkHg==";
     private readonly CatSettings settings;
     private readonly Action save;
+    private readonly EncryptedChatStore chatStore = new();
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
     private readonly System.Windows.Forms.Timer poll = new() { Interval = 20000 };
     private bool busy;
     public event Action<IncomingCatMessage>? MessageReceived;
+    public event Action<string>? ConversationChanged;
 
     public MessagingService(CatSettings settings, Action save)
     {
@@ -59,6 +64,7 @@ internal sealed class MessagingService : IDisposable
     }
 
     public Task EnsureReadyAsync() => EnsureIdentityAsync();
+    public IReadOnlyList<StoredChatMessage> Conversation(string contactId) => chatStore.Conversation(contactId);
 
     public async Task SyncNameAsync()
     {
@@ -160,13 +166,17 @@ internal sealed class MessagingService : IDisposable
         own.ImportPkcs8PrivateKey(ProtectedData.Unprotect(Convert.FromBase64String(settings.PrivateKeyProtected), null, DataProtectionScope.CurrentUser), out _);
         var secret = own.DeriveKeyFromHash(recipientKey.PublicKey, HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes("TaskbarCat-v1"), Encoding.UTF8.GetBytes(recipient.Id));
         var nonce = RandomNumberGenerator.GetBytes(12);
-        var plain = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { messageId = Guid.NewGuid().ToString(), senderId = settings.DeviceId, senderName = settings.Name, text, sentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() }));
+        var messageId = Guid.NewGuid().ToString();
+        var sentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var plain = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { messageId, senderId = settings.DeviceId, senderName = settings.Name, text, sentAt }));
         var cipher = new byte[plain.Length]; var tag = new byte[16];
         using (var aes = new AesGcm(secret, 16)) aes.Encrypt(nonce, plain, cipher, tag, Encoding.UTF8.GetBytes(recipient.Id));
         var envelope = JsonSerializer.Serialize(new { v = 1, nonce = Convert.ToBase64String(nonce), ciphertext = Convert.ToBase64String(cipher), tag = Convert.ToBase64String(tag) });
         using var req = Authorized(HttpMethod.Post, "/v1/messages", JsonSerializer.Serialize(new { recipientId = recipient.Id, envelope }));
         using var response = await http.SendAsync(req);
         if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Die Nachricht konnte gerade nicht gesendet werden.");
+        chatStore.Add(new StoredChatMessage { Id = messageId, ContactId = recipient.Id, SenderName = settings.Name, Text = text, SentAt = sentAt, Outgoing = true });
+        ConversationChanged?.Invoke(recipient.Id);
     }
 
     private async Task EnsureIdentityAsync()
@@ -203,11 +213,17 @@ internal sealed class MessagingService : IDisposable
             var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             foreach (var item in doc.RootElement.GetProperty("messages").EnumerateArray())
             {
+                var accepted = false;
                 try {
                     var msg = Decrypt(item.GetProperty("envelope").GetString()!, item.GetProperty("senderId").GetString()!);
-                    MessageReceived?.Invoke(msg);
+                    chatStore.Add(new StoredChatMessage { Id = msg.MessageId, ContactId = msg.SenderId, SenderName = msg.SenderName, Text = msg.Text, SentAt = msg.SentAt, Outgoing = false });
+                    MarkSeen(msg.MessageId);
+                    accepted = true;
+                    try { ConversationChanged?.Invoke(msg.SenderId); } catch { }
+                    try { MessageReceived?.Invoke(msg); } catch { }
                 }
                 catch { }
+                if (!accepted) continue;
                 using var ack = Authorized(HttpMethod.Delete, "/v1/messages/" + item.GetProperty("id").GetString(), null);
                 using var ignored = await http.SendAsync(ack);
             }
@@ -230,7 +246,7 @@ internal sealed class MessagingService : IDisposable
         using (var aes = new AesGcm(secret, 16)) aes.Decrypt(Convert.FromBase64String(env.GetProperty("nonce").GetString()!), cipher, Convert.FromBase64String(env.GetProperty("tag").GetString()!), plain, Encoding.UTF8.GetBytes(settings.DeviceId));
         var data = JsonDocument.Parse(plain).RootElement;
         if (data.GetProperty("senderId").GetString() != serverSenderId) throw new CryptographicException();
-        return AcceptPayload(data, contact.Name);
+        return AcceptPayload(data, serverSenderId, contact.Name);
     }
 
     private IncomingCatMessage DecryptAdmin(JsonElement env)
@@ -247,19 +263,23 @@ internal sealed class MessagingService : IDisposable
         var data = JsonDocument.Parse(plain).RootElement;
         if (data.GetProperty("senderId").GetString() != "admin") throw new CryptographicException();
         var senderName = data.TryGetProperty("senderName", out var name) ? name.GetString() ?? "Taskbar Cat Admin" : "Taskbar Cat Admin";
-        return AcceptPayload(data, senderName[..Math.Min(senderName.Length, 40)]);
+        return AcceptPayload(data, "admin", senderName[..Math.Min(senderName.Length, 40)]);
     }
 
-    private IncomingCatMessage AcceptPayload(JsonElement data, string senderName)
+    private IncomingCatMessage AcceptPayload(JsonElement data, string senderId, string senderName)
     {
         var messageId = data.GetProperty("messageId").GetString() ?? throw new CryptographicException();
         if (!Guid.TryParse(messageId, out _) || settings.SeenMessageIds.Contains(messageId)) throw new CryptographicException("Wiederholte Nachricht");
         var sentAt = data.GetProperty("sentAt").GetInt64();
         if (Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - sentAt) > 8L * 86400000) throw new CryptographicException("Abgelaufene Nachricht");
+        return new IncomingCatMessage { SenderId = senderId, SenderName = senderName, Text = data.GetProperty("text").GetString() ?? "", MessageId = messageId, SentAt = sentAt };
+    }
+
+    private void MarkSeen(string messageId)
+    {
         settings.SeenMessageIds.Add(messageId);
         if (settings.SeenMessageIds.Count > 1000) settings.SeenMessageIds.RemoveRange(0, settings.SeenMessageIds.Count - 1000);
         save();
-        return new IncomingCatMessage { SenderName = senderName, Text = data.GetProperty("text").GetString() ?? "" };
     }
 
     private HttpRequestMessage Authorized(HttpMethod method, string path, string? json)

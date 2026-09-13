@@ -646,6 +646,7 @@ internal sealed class SettingsForm : Form
     private readonly ListBox searchResults = new();
     private readonly ListBox friendList = new();
     private readonly ListBox contacts = new();
+    private readonly FlowLayoutPanel chatHistory = new() { AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Color.FromArgb(235, 231, 222) };
     private readonly TextBox message = new() { Multiline = true, MaxLength = 500, ScrollBars = ScrollBars.Vertical };
     private readonly Label status = new() { AutoSize = true, ForeColor = Color.FromArgb(63, 94, 69), MaximumSize = new Size(350, 38) };
     public CatSettings Value => current;
@@ -660,7 +661,7 @@ internal sealed class SettingsForm : Form
         BackColor = Color.FromArgb(246, 242, 234); Font = new Font("Segoe UI", 10);
         var header = new Label { Text = "🐾  Taskbar Cat", Font = new Font("Segoe UI", 18, FontStyle.Bold), ForeColor = Color.FromArgb(35, 52, 39), AutoSize = true, Location = new Point(22, 14) };
         var tabs = new TabControl { Location = new Point(18, 56), Size = new Size(574, 448) };
-        var general = Page("Meine Katze"); var friends = Page("Freunde"); var chat = Page("Nachricht");
+        var general = Page("Meine Katze"); var friends = Page("Freunde"); var chat = Page("Chats");
         tabs.TabPages.AddRange(new[] { general, friends, chat });
 
         foreach (var s in Screen.AllScreens) monitor.Items.Add($"{s.DeviceName} ({s.Bounds.Width} × {s.Bounds.Height})");
@@ -699,10 +700,20 @@ internal sealed class SettingsForm : Form
         friendList.SetBounds(15, 285, 520, 105);
         friends.Controls.AddRange(new Control[] { PositionedLabel("Katze über ihren Namen suchen", 15, 18), userSearch, search, searchResults, add, PositionedLabel("Deine Freundesliste", 15, 257), friendList });
 
-        contacts.SetBounds(15, 46, 520, 115); contacts.Items.AddRange(current.Contacts.Cast<object>().ToArray());
-        message.SetBounds(15, 208, 520, 110);
-        var send = ButtonFor("Mit der Katze senden", 15, 334, async () => { if (contacts.SelectedItem is not CatContact c) { status.Text = "Bitte zuerst einen Freund auswählen."; return; } try { status.Text = "Wird verschlüsselt gesendet …"; await messaging.SendAsync(c, message.Text); message.Clear(); status.Text = "Nachricht ist unterwegs. 🐾"; } catch (Exception ex) { status.Text = ex.Message; } });
-        chat.Controls.AddRange(new Control[] { PositionedLabel("An wen?", 15, 16), contacts, PositionedLabel("Nachricht (maximal 500 Zeichen)", 15, 177), message, send });
+        contacts.SetBounds(10, 37, 135, 350); contacts.Items.AddRange(current.Contacts.Cast<object>().ToArray());
+        chatHistory.SetBounds(155, 12, 380, 300);
+        message.SetBounds(155, 323, 270, 64);
+        var send = ButtonFor("Senden", 435, 323, async () =>
+        {
+            if (contacts.SelectedItem is not CatContact c) { status.Text = "Bitte zuerst einen Freund auswählen."; return; }
+            try { status.Text = "Wird Ende-zu-Ende verschlüsselt …"; await messaging.SendAsync(c, message.Text); message.Clear(); RenderConversation(); status.Text = "Gesendet. 🐾"; }
+            catch (Exception ex) { status.Text = ex.Message; }
+        });
+        chat.Controls.AddRange(new Control[] { PositionedLabel("Chats", 10, 12), contacts, chatHistory, message, send });
+        contacts.SelectedIndexChanged += (_, _) => RenderConversation();
+        Action<string> conversationChanged = contactId => { if (contacts.SelectedItem is CatContact selected && selected.Id == contactId) RenderConversation(); };
+        messaging.ConversationChanged += conversationChanged;
+        FormClosed += (_, _) => messaging.ConversationChanged -= conversationChanged;
 
         var save = ButtonFor("Speichern", 397, 519, async () =>
         {
@@ -716,9 +727,39 @@ internal sealed class SettingsForm : Form
 
         void ReloadContacts(IEnumerable<CatContact> values)
         {
+            var selectedId = (contacts.SelectedItem as CatContact)?.Id;
             var list = values.OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
             friendList.Items.Clear(); friendList.Items.AddRange(list.Cast<object>().ToArray());
             contacts.Items.Clear(); contacts.Items.AddRange(list.Cast<object>().ToArray());
+            if (list.Length > 0) contacts.SelectedItem = list.FirstOrDefault(x => x.Id == selectedId) ?? list[0];
+        }
+
+        void RenderConversation()
+        {
+            chatHistory.SuspendLayout();
+            chatHistory.Controls.Clear();
+            if (contacts.SelectedItem is not CatContact contact)
+            {
+                chatHistory.Controls.Add(new Label { Text = "Wähle links eine Katze aus.", ForeColor = Color.FromArgb(90, 100, 92), AutoSize = true, Margin = new Padding(18) });
+                chatHistory.ResumeLayout(); return;
+            }
+            foreach (var item in messaging.Conversation(contact.Id)) chatHistory.Controls.Add(MessageRow(item));
+            chatHistory.ResumeLayout();
+            if (chatHistory.Controls.Count > 0) chatHistory.ScrollControlIntoView(chatHistory.Controls[^1]);
+        }
+
+        Control MessageRow(StoredChatMessage item)
+        {
+            const int rowWidth = 350, maxBubbleWidth = 265;
+            var bodySize = TextRenderer.MeasureText(item.Text, Font, new Size(maxBubbleWidth - 22, 1000), TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
+            var bubbleWidth = Math.Clamp(bodySize.Width + 22, 90, maxBubbleWidth);
+            var bubbleHeight = Math.Max(48, bodySize.Height + 28);
+            var row = new Panel { Width = rowWidth, Height = bubbleHeight + 8, Margin = new Padding(4, 2, 4, 2) };
+            var bubble = new Panel { Width = bubbleWidth, Height = bubbleHeight, Left = item.Outgoing ? rowWidth - bubbleWidth - 4 : 4, Top = 2, BackColor = item.Outgoing ? Color.FromArgb(205, 234, 202) : Color.White };
+            var body = new Label { Text = item.Text, AutoSize = false, Left = 10, Top = 7, Width = bubbleWidth - 20, Height = bubbleHeight - 23, ForeColor = Color.FromArgb(31, 43, 34) };
+            var time = DateTimeOffset.FromUnixTimeMilliseconds(item.SentAt).ToLocalTime().ToString("HH:mm");
+            var stamp = new Label { Text = time, AutoSize = true, Font = new Font("Segoe UI", 7.5f), ForeColor = Color.FromArgb(103, 117, 106), Left = bubbleWidth - 42, Top = bubbleHeight - 18 };
+            bubble.Controls.Add(body); bubble.Controls.Add(stamp); row.Controls.Add(bubble); return row;
         }
     }
     private TabPage Page(string title) => new(title) { BackColor = BackColor, Padding = new Padding(12) };
