@@ -712,8 +712,10 @@ internal sealed class SettingsForm : Form
         chat.Controls.AddRange(new Control[] { PositionedLabel("Chats", 10, 12), contacts, chatHistory, message, send });
         contacts.SelectedIndexChanged += (_, _) => RenderConversation();
         Action<string> conversationChanged = contactId => { if (contacts.SelectedItem is CatContact selected && selected.Id == contactId) RenderConversation(); };
+        Action<IReadOnlyList<CatContact>> friendsChanged = updated => ReloadContacts(updated);
         messaging.ConversationChanged += conversationChanged;
-        FormClosed += (_, _) => messaging.ConversationChanged -= conversationChanged;
+        messaging.FriendsChanged += friendsChanged;
+        FormClosed += (_, _) => { messaging.ConversationChanged -= conversationChanged; messaging.FriendsChanged -= friendsChanged; };
 
         var save = ButtonFor("Speichern", 397, 519, async () =>
         {

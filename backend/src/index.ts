@@ -42,6 +42,13 @@ async function readSession(request: Request, env: Env) {
 function page(content: string, status = 200, extra: HeadersInit = {}) {
   return new Response(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Taskbar Cat Admin</title><style>body{margin:0;background:#f5f1e8;color:#203326;font:16px system-ui}.wrap{max-width:760px;margin:48px auto;padding:24px}.card{background:#fffdf8;border:1px solid #cad8c9;border-radius:18px;padding:26px;box-shadow:0 12px 35px #20332618}h1{margin-top:0}label{display:block;margin:18px 0 6px;font-weight:650}input,select,textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #9cad9c;border-radius:9px;font:inherit}textarea{min-height:150px;resize:vertical}button{margin-top:18px;padding:12px 18px;border:1px solid #6e906f;border-radius:9px;background:#dcebdc;color:#19371f;font-weight:700;cursor:pointer}.note{color:#58705c;font-size:14px}.ok{padding:10px;background:#e1f4df;border-radius:8px}</style></head><body><main class="wrap"><div class="card">${content}</div></main></body></html>`, { status, headers: { ...securityHeaders, ...extra } });
 }
+function presenceLabel(lastSeen: number, now = Date.now()) {
+  const seconds = Math.max(0, Math.floor((now - lastSeen) / 1000));
+  if (seconds <= 90) return "● online";
+  if (seconds < 3600) return `zuletzt online vor ${Math.max(2, Math.floor(seconds / 60))} Minuten`;
+  if (seconds < 86400) { const hours = Math.floor(seconds / 3600); return `zuletzt online vor ${hours} ${hours === 1 ? "Stunde" : "Stunden"}`; }
+  const days = Math.floor(seconds / 86400); return `zuletzt online vor ${days} ${days === 1 ? "Tag" : "Tagen"}`;
+}
 async function adminDashboard(env: Env, csrf: string, sent: boolean) {
   const [rows, profile] = await Promise.all([
     env.DB.prepare("SELECT id,username,last_seen FROM devices WHERE id <> 'admin' ORDER BY username COLLATE NOCASE LIMIT 500").all<{id:string,username:string,last_seen:number}>(),
@@ -49,7 +56,8 @@ async function adminDashboard(env: Env, csrf: string, sent: boolean) {
   ]);
   const options = rows.results.map(d => {
     const isTemporary = /^cat-[0-9a-f]{8}$/i.test(d.username);
-    const label = isTemporary ? `@${d.username} (noch kein eigener Name)` : `@${d.username}`;
+    const name = isTemporary ? `@${d.username} (noch kein eigener Name)` : `@${d.username}`;
+    const label = `${name} — ${presenceLabel(d.last_seen)}`;
     return `<option value="${htmlEscape(d.id)}">${htmlEscape(label)}</option>`;
   }).join("");
   return page(`<h1>🐾 Taskbar Cat Admin</h1>${sent ? '<p class="ok">Nachricht wurde sicher bereitgestellt.</p>' : ''}<form method="post" action="/admin/send"><input type="hidden" name="csrf" value="${htmlEscape(csrf)}"><label>Dein Absendername</label><input name="senderName" minlength="1" maxlength="40" value="${htmlEscape(profile?.sender_name ?? "Taskbar Cat Admin")}" required><label>Katze auswählen (Username)</label><select name="recipientId" size="${Math.min(Math.max(rows.results.length, 2), 8)}" required>${options}</select><p class="note">Ältere Katzen erhalten ihren gewählten Username, sobald die aktuelle EXE einmal gestartet wurde.</p><label>Nachricht</label><textarea name="message" maxlength="500" required></textarea><button type="submit">Nachricht senden</button></form><p class="note">Die Nachricht erscheint mit deinem Absendernamen in der Gedankenblase der ausgewählten Katze.</p>`);
@@ -78,7 +86,12 @@ async function authenticate(request: Request, env: Env) {
   const value = request.headers.get("authorization") ?? "";
   if (!value.startsWith("Bearer ") || value.length > 400) return null;
   const tokenHash = await sha256(value.slice(7));
-  return env.DB.prepare("SELECT id FROM devices WHERE token_hash = ?").bind(tokenHash).first<{ id: string }>();
+  const device = await env.DB.prepare("SELECT id FROM devices WHERE token_hash = ?").bind(tokenHash).first<{ id: string }>();
+  if (device) {
+    const now = Date.now();
+    await env.DB.prepare("UPDATE devices SET last_seen=? WHERE id=? AND last_seen<?").bind(now, device.id, now - 60000).run();
+  }
+  return device;
 }
 
 export default {
@@ -158,28 +171,30 @@ export default {
         const query = normalizeUsername(url.searchParams.get("q") ?? "");
         if (query.length < 2 || query.length > 24) return json({ users: [] });
         const escaped = query.replace(/[\\%_]/g, "\\$&");
-        const rows = await env.DB.prepare("SELECT id,username FROM devices WHERE id<>? AND id<>'admin' AND username LIKE ? ESCAPE '\\' COLLATE NOCASE ORDER BY CASE WHEN username LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 0 ELSE 1 END, length(username), username COLLATE NOCASE LIMIT 10")
-          .bind(auth.id, `%${escaped}%`, `${escaped}%`).all<{id:string,username:string}>();
-        return json({ users: rows.results });
+        const now = Date.now();
+        const rows = await env.DB.prepare("SELECT id,username,last_seen lastSeen FROM devices WHERE id<>? AND id<>'admin' AND username LIKE ? ESCAPE '\\' COLLATE NOCASE ORDER BY CASE WHEN username LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 0 ELSE 1 END, length(username), username COLLATE NOCASE LIMIT 10")
+          .bind(auth.id, `%${escaped}%`, `${escaped}%`).all<{id:string,username:string,lastSeen:number}>();
+        return json({ users: rows.results.map(x => ({ ...x, online: now - x.lastSeen <= 90000 })) });
       }
 
       if (request.method === "GET" && url.pathname === "/v1/friends") {
-        const rows = await env.DB.prepare("SELECT d.id,d.username,d.public_key publicKey FROM friendships f JOIN devices d ON d.id=f.friend_id WHERE f.device_id=? ORDER BY d.username COLLATE NOCASE")
-          .bind(auth.id).all<{id:string,username:string,publicKey:string}>();
-        return json({ friends: rows.results });
+        const now = Date.now();
+        const rows = await env.DB.prepare("SELECT d.id,d.username,d.public_key publicKey,d.last_seen lastSeen FROM friendships f JOIN devices d ON d.id=f.friend_id WHERE f.device_id=? ORDER BY d.username COLLATE NOCASE")
+          .bind(auth.id).all<{id:string,username:string,publicKey:string,lastSeen:number}>();
+        return json({ friends: rows.results.map(x => ({ ...x, online: now - x.lastSeen <= 90000 })) });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/friends") {
         const body = await request.json<{ deviceId?: string }>(); const friendId = body.deviceId ?? "";
         if (!validId(friendId) || friendId === auth.id) return json({ error: "invalid_friend" }, 400);
-        const friend = await env.DB.prepare("SELECT id,username,public_key publicKey FROM devices WHERE id=? AND id<>'admin'").bind(friendId).first<{id:string,username:string,publicKey:string}>();
+        const friend = await env.DB.prepare("SELECT id,username,public_key publicKey,last_seen lastSeen FROM devices WHERE id=? AND id<>'admin'").bind(friendId).first<{id:string,username:string,publicKey:string,lastSeen:number}>();
         if (!friend) return json({ error: "not_found" }, 404);
         const now = Date.now();
         await env.DB.batch([
           env.DB.prepare("INSERT OR IGNORE INTO friendships(device_id,friend_id,created_at) VALUES(?,?,?)").bind(auth.id, friendId, now),
           env.DB.prepare("INSERT OR IGNORE INTO friendships(device_id,friend_id,created_at) VALUES(?,?,?)").bind(friendId, auth.id, now)
         ]);
-        return json({ friend }, 201);
+        return json({ friend: { ...friend, online: Date.now() - friend.lastSeen <= 90000 } }, 201);
       }
 
       if (request.method === "POST" && url.pathname === "/v1/messages") {

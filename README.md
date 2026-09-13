@@ -41,6 +41,7 @@ Die Animationen bestehen aus handabgestimmten Einzelbildern. Die App bewegt die 
 - eindeutiger öffentlicher Katzenname; Standardname ist `Sneaker`
 - Suche nach Katzennamen mit bis zu zehn ähnlichen Treffern
 - gegenseitige Freundesliste ohne Austausch langer Einladungscodes
+- Online-Status und verständliche „zuletzt online“-Angabe bei Freunden
 - verschlüsselte Nachrichten in automatisch wachsenden Gedankenblasen und einem Chatfenster
 - Tray-Menü mit Einstellungen, Pause und Beenden
 - automatische Aktualisierung über geprüfte GitHub-Releases
@@ -74,6 +75,8 @@ stateDiagram-v2
 Im Katzenmenü reicht ein Teil des gesuchten Namens. Die App zeigt höchstens zehn passende Katzen an. Wird eine Katze hinzugefügt, erscheint die Verbindung automatisch auf beiden Freundeslisten. Anschließend können Nachrichten mit bis zu 500 Zeichen gesendet werden.
 
 Der Tab **Chats** zeigt pro Freund einen Verlauf mit getrennten ein- und ausgehenden Nachrichtenblasen sowie lokalen Zeitstempeln. Der Verlauf liegt nicht unverschlüsselt in den Einstellungen, sondern wird als eigene, mit Windows DPAPI geschützte Datei im jeweiligen Windows-Benutzerkonto gespeichert. Bereits vor Einführung des Chatverlaufs zugestellte Nachrichten können nicht nachträglich wiederhergestellt werden.
+
+Eine Katze gilt als online, wenn die EXE läuft und sich innerhalb der letzten 90 Sekunden beim Dienst gemeldet hat. Andernfalls zeigen Suche, Freundesliste und Chat-Auswahl an, wie viele Minuten, Stunden oder Tage sie zuletzt online war. Das Admin-Dashboard verwendet dieselbe Statuslogik.
 
 ```mermaid
 flowchart LR

@@ -10,14 +10,29 @@ internal sealed class CatContact
     public string Id { get; set; } = "";
     public string Name { get; set; } = "Freund";
     public string PublicKey { get; set; } = "";
-    public override string ToString() => Name;
+    public long LastSeen { get; set; }
+    public bool IsOnline { get; set; }
+    public string Presence => PresenceText(IsOnline, LastSeen);
+    public override string ToString() => $"{Name}  ·  {Presence}";
+
+    internal static string PresenceText(bool online, long lastSeen)
+    {
+        if (online) return "● online";
+        if (lastSeen <= 0) return "noch nie online";
+        var elapsed = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(lastSeen);
+        if (elapsed.TotalMinutes < 60) return $"zuletzt vor {Math.Max(2, (int)elapsed.TotalMinutes)} Min.";
+        if (elapsed.TotalHours < 24) return $"zuletzt vor {(int)elapsed.TotalHours} Std.";
+        return $"zuletzt vor {(int)elapsed.TotalDays} Tg.";
+    }
 }
 
 internal sealed class CatSearchResult
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
-    public override string ToString() => Name;
+    public long LastSeen { get; set; }
+    public bool IsOnline { get; set; }
+    public override string ToString() => $"{Name}  ·  {CatContact.PresenceText(IsOnline, LastSeen)}";
 }
 
 internal sealed class IncomingCatMessage
@@ -42,6 +57,7 @@ internal sealed class MessagingService : IDisposable
     private bool busy;
     public event Action<IncomingCatMessage>? MessageReceived;
     public event Action<string>? ConversationChanged;
+    public event Action<IReadOnlyList<CatContact>>? FriendsChanged;
 
     public MessagingService(CatSettings settings, Action save)
     {
@@ -115,7 +131,9 @@ internal sealed class MessagingService : IDisposable
         return doc.RootElement.GetProperty("users").EnumerateArray().Select(x => new CatSearchResult
         {
             Id = x.GetProperty("id").GetString()!,
-            Name = x.GetProperty("username").GetString()!
+            Name = x.GetProperty("username").GetString()!,
+            LastSeen = x.GetProperty("lastSeen").GetInt64(),
+            IsOnline = x.GetProperty("online").GetBoolean()
         }).ToList();
     }
 
@@ -127,7 +145,7 @@ internal sealed class MessagingService : IDisposable
         if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Der Freund konnte nicht hinzugefügt werden.");
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var item = doc.RootElement.GetProperty("friend");
-        var contact = new CatContact { Id = item.GetProperty("id").GetString()!, Name = item.GetProperty("username").GetString()!, PublicKey = item.GetProperty("publicKey").GetString()! };
+        var contact = new CatContact { Id = item.GetProperty("id").GetString()!, Name = item.GetProperty("username").GetString()!, PublicKey = item.GetProperty("publicKey").GetString()!, LastSeen = item.GetProperty("lastSeen").GetInt64(), IsOnline = item.GetProperty("online").GetBoolean() };
         UpsertContact(contact);
         return contact;
     }
@@ -141,10 +159,11 @@ internal sealed class MessagingService : IDisposable
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var contacts = doc.RootElement.GetProperty("friends").EnumerateArray().Select(x => new CatContact
         {
-            Id = x.GetProperty("id").GetString()!, Name = x.GetProperty("username").GetString()!, PublicKey = x.GetProperty("publicKey").GetString()!
+            Id = x.GetProperty("id").GetString()!, Name = x.GetProperty("username").GetString()!, PublicKey = x.GetProperty("publicKey").GetString()!, LastSeen = x.GetProperty("lastSeen").GetInt64(), IsOnline = x.GetProperty("online").GetBoolean()
         }).ToList();
         settings.Contacts = contacts;
         save();
+        try { FriendsChanged?.Invoke(contacts); } catch { }
         return contacts;
     }
 
