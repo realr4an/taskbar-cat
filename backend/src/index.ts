@@ -47,8 +47,12 @@ async function adminDashboard(env: Env, csrf: string, sent: boolean) {
     env.DB.prepare("SELECT id,username,last_seen FROM devices WHERE id <> 'admin' ORDER BY username COLLATE NOCASE LIMIT 500").all<{id:string,username:string,last_seen:number}>(),
     env.DB.prepare("SELECT sender_name FROM admin_settings WHERE id=1").first<{sender_name:string}>()
   ]);
-  const options = rows.results.map(d => `<option value="${htmlEscape(d.id)}">${htmlEscape(d.username)} · ${htmlEscape(d.id.slice(0, 8))}</option>`).join("");
-  return page(`<h1>🐾 Taskbar Cat Admin</h1>${sent ? '<p class="ok">Nachricht wurde sicher bereitgestellt.</p>' : ''}<form method="post" action="/admin/send"><input type="hidden" name="csrf" value="${htmlEscape(csrf)}"><label>Dein Absendername</label><input name="senderName" minlength="1" maxlength="40" value="${htmlEscape(profile?.sender_name ?? "Taskbar Cat Admin")}" required><label>Empfänger</label><select name="recipientId" required>${options}</select><label>Nachricht</label><textarea name="message" maxlength="500" required></textarea><button type="submit">Nachricht senden</button></form><p class="note">Die Nachricht erscheint mit deinem Absendernamen in der Gedankenblase der ausgewählten Katze.</p>`);
+  const options = rows.results.map(d => {
+    const isTemporary = /^cat-[0-9a-f]{8}$/i.test(d.username);
+    const label = isTemporary ? `@${d.username} (noch kein eigener Name)` : `@${d.username}`;
+    return `<option value="${htmlEscape(d.id)}">${htmlEscape(label)}</option>`;
+  }).join("");
+  return page(`<h1>🐾 Taskbar Cat Admin</h1>${sent ? '<p class="ok">Nachricht wurde sicher bereitgestellt.</p>' : ''}<form method="post" action="/admin/send"><input type="hidden" name="csrf" value="${htmlEscape(csrf)}"><label>Dein Absendername</label><input name="senderName" minlength="1" maxlength="40" value="${htmlEscape(profile?.sender_name ?? "Taskbar Cat Admin")}" required><label>Katze auswählen (Username)</label><select name="recipientId" size="${Math.min(Math.max(rows.results.length, 2), 8)}" required>${options}</select><p class="note">Ältere Katzen erhalten ihren gewählten Username, sobald die aktuelle EXE einmal gestartet wurde.</p><label>Nachricht</label><textarea name="message" maxlength="500" required></textarea><button type="submit">Nachricht senden</button></form><p class="note">Die Nachricht erscheint mit deinem Absendernamen in der Gedankenblase der ausgewählten Katze.</p>`);
 }
 
 async function createAdminEnvelope(env: Env, recipientId: string, recipientPublicKey: string, senderName: string, text: string) {
